@@ -1,0 +1,10 @@
+student ID:   
+
+Clock Period:  (ns)
+
+simulation time for tb1: ... (ns)
+simulation time for tb2: ... (ns)
+simulation time for tb3: ... (ns)
+simulation time for tb4: ... (ns)
+
+Area:         (um^2)
