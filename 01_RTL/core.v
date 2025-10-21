@@ -25,6 +25,7 @@ module core (                       //Don't modify interface
 	output 			o_exe_finish
 );
 
+	// Output ports
 	reg [7:0] o_out_data1_r;
 	reg [7:0] o_out_data2_r;
 	reg [7:0] o_out_data3_r;
@@ -81,8 +82,65 @@ module core (                       //Don't modify interface
 	// Fetching Weight
 	reg [7:0] weight_r [0:8];
 
+	// Saving IMG
+	reg         cen_r;
+	reg         flip_r;
+	reg         wen_r      [0:7];
+	reg [8:0]   img_addr_r [0:7];
+	reg [7:0]   img_in_r   [0:7];
+	reg         img_done_r;
+	
+	wire       cen_w;
+	wire       wen_w      [0:7];
+	wire [8:0] img_addr_w [0:7];
+	wire [7:0] img_in_w   [0:7];
+	wire [7:0] img_out_w  [0:7];
+	genvar j;
+	integer i;
+	
+	assign cen_w = cen_r;
+
+	generate
+		for (j = 0; j < 8; j = j + 1) begin
+			assign img_addr_w[j] = img_addr_r[j];
+			assign img_in_w[j] = img_in_r[j];
+			assign wen_w[j] = wen_r[j];
+			sram_512x8 sram(
+				.Q(img_out_w[j]),
+				.CLK(i_clk),
+				.CEN(cen_w),
+				.WEN(wen_w[j]),
+				.A(img_addr_w[j]),
+				.D(img_in_w[j])
+			);
+		end
+	endgenerate
+
+	always @(*) begin
+		case (state_r)
+			S_IDLE: begin
+				if (i_in_valid) next_state_r = S_IMG;
+				else next_state_r = S_IDLE;
+			end
+			S_IMG:  begin
+				if (img_addr_r[0] == 511 && flip_r == 1) next_state_r = S_BUFF;
+				else next_state_r = S_IMG;
+			end
+			S_BUFF: begin
+				next_state_r = S_WEI;
+			end
+			S_WEI:  begin
+				if (wei_cnt_r == 2) next_state_r = S_CONV;
+				else next_state_r = S_WEI;
+			end 
+			S_CONV: next_state_r = S_CONV;  // todo 
+			default: next_state_r = S_IDLE;
+		endcase
+	end
+
 	always @(posedge i_clk or negedge i_rst_n) begin
 		if (!i_rst_n) begin
+			// for barcode
 			seq_r <= 57'b0;
 			curr_seq_r <= 57'b0;
 			start_r <= 0;
@@ -97,15 +155,65 @@ module core (                       //Don't modify interface
 			dil_r <= 0;
 			barcode_done_r <= 0;
 			o_in_ready_r <= 0;
+			// for img
+			cen_r <= 1;
+			flip_r <= 0;
+			img_done_r <= 0;
+			for (i = 0; i < 8; i = i + 1) begin
+				wen_r[i]      <= 1;
+				img_addr_r[i] <= 0;
+				img_in_r[i]   <= 0;
+			end
 		end
 		else begin
 			state_r <= next_state_r;
 			case (state_r)
 				S_IDLE: begin
-					
+					// for img
+					if (i_in_valid) begin
+						cen_r <= 0;
+						for (i = 0; i < 4; i = i + 1) begin
+							wen_r[i] <= 0;
+						end
+						img_in_r[0] <= i_in_data[31:24];
+						img_in_r[1] <= i_in_data[23:16];
+						img_in_r[2] <= i_in_data[15:8];
+						img_in_r[3] <= i_in_data[7:0];
+						flip_r <= 1;
+					end
 				end
 				S_IMG: begin
-
+					// for img
+					if (i_in_valid) begin
+						if (img_addr_r == 511 && flip_r == 1) begin
+							o_out_valid1_r <= 1;
+							o_out_valid2_r <= 1;
+							o_out_valid3_r <= 1;
+							o_out_data1_r <= ker_r;
+							o_out_data2_r <= str_r;
+							o_out_data3_r <= dil_r;
+						end
+						if (flip_r) begin
+							for (i = 0; i < 4; i = i + 1) wen_r[i] <= 0;
+							for (i = 4; i < 8; i = i + 1) wen_r <= 1;
+							for (i = 0; i < 8; i = i + 1) img_addr_r[i] <= img_addr_r[i] + 1;
+							img_in_r[0] <= i_in_data[31:24];
+							img_in_r[1] <= i_in_data[23:16];
+							img_in_r[2] <= i_in_data[15:8];
+							img_in_r[3] <= i_in_data[7:0];
+							flip_r <= 0;
+						end
+						else begin
+							img_in_r[4] <= i_in_data[31:24];
+							img_in_r[5] <= i_in_data[23:16];
+							img_in_r[6] <= i_in_data[15:8];
+							img_in_r[7] <= i_in_data[7:0];
+							for (i = 0; i < 4; i = i + 1) wen_r[i] <= 1;
+							for (i = 4; i < 8; i = i + 1) wen_r[i] <= 0;
+							flip_r <= 1;
+						end
+					end
+					// for barcode
 					if (i_in_valid && !barcode_done_r) begin  // Stop decoding once done
 						// Update shift register and pass counter
 						shift_lsb_r <= (pass_cnt_r == 0) ? {9'b0, lsb_w} : {shift_lsb_r[8:0], lsb_w};
@@ -239,6 +347,12 @@ module core (                       //Don't modify interface
 						end
 					end
 				end 
+				S_BUFF: begin
+					for (i = 4; i < 8; i = i + 1) wen_r[i] <= 1;
+					o_out_valid1_r <= 0;
+					o_out_valid2_r <= 0;
+					o_out_valid3_r <= 0;
+				end
 				S_WEI: begin
 					// optimization point: if statement or padding reg to 12
 					wei_cnt_r <= (wei_cnt_r == 2) ? 0 : wei_cnt_r + 1;
@@ -258,142 +372,6 @@ module core (                       //Don't modify interface
 						weight_r[8] <= i_in_data[31:24];
 					end
 				end
-			endcase
-		end
-	end
-
-	// Saving IMG
-	reg         cen_r;
-	reg         flip_r;
-	reg         wen_r      [0:7];
-	reg [8:0]   img_addr_r [0:7];
-	reg [7:0]   img_in_r   [0:7];
-	reg         img_done_r;
-	
-	wire       cen_w;
-	wire       wen_w      [0:7];
-	wire [8:0] img_addr_w [0:7];
-	wire [7:0] img_in_w   [0:7];
-	wire [7:0] img_out_w  [0:7];
-	genvar j;
-	integer i;
-	
-	assign cen_w = cen_r;
-
-	generate
-		for (j = 0; j < 8; j = j + 1) begin
-			assign img_addr_w[j] = img_addr_r[j];
-			assign img_in_w[j] = img_in_r[j];
-			assign wen_w[j] = wen_r[j];
-			sram_512x8 sram(
-				.Q(img_out_w[j]),
-				.CLK(i_clk),
-				.CEN(cen_w),
-				.WEN(wen_w[j]),
-				.A(img_addr_w[j]),
-				.D(img_in_w[j])
-			);
-		end
-	endgenerate
-
-	always @(*) begin
-		case (state_r)
-			S_IDLE: begin
-				if (i_in_valid) next_state_r = S_IMG;
-				else next_state_r = S_IDLE;
-			end
-			S_IMG:  begin
-				if (img_addr_r[0] == 511 && flip_r == 1) next_state_r = S_BUFF;
-				else next_state_r = S_IMG;
-			end
-			S_BUFF: begin
-				// todo: check parameter recieved
-			end
-			S_WEI:  begin
-				if (wei_cnt_r == 2) next_state_r = S_CONV;
-				else next_state_r = S_WEI;
-			end 
-			S_CONV: next_state_r = S_CONV;  // todo 
-			default: next_state_r = S_IDLE;
-		endcase
-	end
-
-	always @(posedge i_clk or negedge i_rst_n) begin
-		if (!i_rst_n) begin
-			cen_r <= 1;
-			flip_r <= 0;
-			img_done_r <= 0;
-			for (i = 0; i < 8; i = i + 1) begin
-				wen_r[i]      <= 1;
-				img_addr_r[i] <= 0;
-				img_in_r[i]   <= 0;
-			end
-		end
-		else begin
-			case (state_r):
-				S_IDLE: begin
-					if (i_in_valid) begin
-						cen_r <= 0;
-						wen_r[0] <= 0;
-						wen_r[1] <= 0;
-						wen_r[2] <= 0;
-						wen_r[3] <= 0;
-						img_in_r[0] <= i_in_data[31:24];
-						img_in_r[1] <= i_in_data[23:16];
-						img_in_r[2] <= i_in_data[15:8];
-						img_in_r[3] <= i_in_data[7:0];
-						flip_r <= 1;
-					end
-				end 
-				S_IMG: begin
-					if (i_in_valid) begin
-						if (flip_r) begin
-							wen_r[0] <= 0;
-							wen_r[1] <= 0;
-							wen_r[2] <= 0;
-							wen_r[3] <= 0;
-							wen_r[4] <= 1;
-							wen_r[5] <= 1;
-							wen_r[6] <= 1;
-							wen_r[7] <= 1;
-							img_in_r[0] <= i_in_data[31:24];
-							img_in_r[1] <= i_in_data[23:16];
-							img_in_r[2] <= i_in_data[15:8];
-							img_in_r[3] <= i_in_data[7:0];
-							flip_r <= 0;
-							img_addr_r[0] <= img_addr_r[0] + 1;
-							img_addr_r[1] <= img_addr_r[1] + 1;
-							img_addr_r[2] <= img_addr_r[2] + 1;
-							img_addr_r[3] <= img_addr_r[3] + 1;
-							img_addr_r[4] <= img_addr_r[4] + 1;
-							img_addr_r[5] <= img_addr_r[5] + 1;
-							img_addr_r[6] <= img_addr_r[6] + 1;
-							img_addr_r[7] <= img_addr_r[7] + 1;
-						end
-						else begin
-							img_in_r[4] <= i_in_data[31:24];
-							img_in_r[5] <= i_in_data[23:16];
-							img_in_r[6] <= i_in_data[15:8];
-							img_in_r[7] <= i_in_data[7:0];
-							wen_r[0] <= 1;
-							wen_r[1] <= 1;
-							wen_r[2] <= 1;
-							wen_r[3] <= 1;
-							wen_r[4] <= 0;
-							wen_r[5] <= 0;
-							wen_r[6] <= 0;
-							wen_r[7] <= 0;
-							flip_r <= 1;
-						end
-					end
-				end
-				S_BUFF: begin
-					wen_r[4] <= 1;
-					wen_r[5] <= 1;
-					wen_r[6] <= 1;
-					wen_r[7] <= 1;
-				end
-				default: 
 			endcase
 		end
 	end
