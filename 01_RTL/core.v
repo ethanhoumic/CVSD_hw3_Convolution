@@ -91,6 +91,20 @@ module core (                       //Don't modify interface
 	wire [6:0]  pass_cnt_next_w;
 	wire [2:0]  ker_decoded_w, str_decoded_w, dil_decoded_w;
 	wire        barcode_valid_w;
+	wire        is_53_w = (seq_cnt_r == 53);
+	wire        is_54_w = (seq_cnt_r == 54);
+	wire        is_55_w = (seq_cnt_r == 55);
+	wire        is_56_w = (seq_cnt_r == 56);
+	wire        not_stop53_w  = (is_53_w && ({curr_seq_r[8:0], lsb_w} != STOP_CODE));
+	wire        not_stop54_w  = (is_54_w && ({curr_seq_r[9:0], lsb_w[3:1]} != STOP_CODE));
+	wire        not_stop55_w  = (is_55_w && ({curr_seq_r[10:0], lsb_w[3:2]} != STOP_CODE));
+	wire        not_stop56_w  = (is_56_w && ({curr_seq_r[11:0], lsb_w[3]} != STOP_CODE));
+	wire        not_stop_w    = (not_stop53_w || not_stop54_w || not_stop55_w || not_stop56_w);
+	wire        match_seq53_w = (is_53_w && (seq_r == {curr_seq_r[52:0], lsb_w}));
+	wire        match_seq54_w = (is_54_w && (seq_r == {curr_seq_r[53:0], lsb_w[3:1]}));
+	wire        match_seq55_w = (is_55_w && (seq_r == {curr_seq_r[54:0], lsb_w[3:2]}));
+	wire        match_seq56_w = (is_56_w && (seq_r == {curr_seq_r[55:0], lsb_w[3]}));
+	wire        is_match_seq_w = (match_seq53_w || match_seq54_w || match_seq55_w || match_seq56_w);
 
 	assign lsb_w = {i_in_data[24], i_in_data[16], i_in_data[8], i_in_data[0]};
 	assign shift_lsb_next_w = (pass_cnt_r == 0) ? {9'b0, lsb_w} : {shift_lsb_r[8:0], lsb_w};
@@ -600,7 +614,7 @@ module core (                       //Don't modify interface
 			row_start_r <= 1'b0;
 			barcode_done_r <= 1'b0;
 		end
-		else if (state_r == S_IDLE) begin
+		else if (state_r == S_IDLE && !i_in_valid) begin
 			// Reset barcode decoding on new image
 			shift_lsb_r <= 13'd0;
 			pass_cnt_r <= 7'd0;
@@ -613,7 +627,7 @@ module core (                       //Don't modify interface
 			row_start_r <= 1'b0;
 			barcode_done_r <= 1'b0;
 		end
-		else if (state_r == S_IMG && i_in_valid && !barcode_done_r) begin
+		else if ((state_r == S_IMG || state_r == S_IDLE) && i_in_valid && !barcode_done_r) begin
 			// Update shift register and pass counter
 			shift_lsb_r <= shift_lsb_next_w;
 			pass_cnt_r <= pass_cnt_next_w;
@@ -622,13 +636,26 @@ module core (                       //Don't modify interface
 				// Already found potential barcode start, now validating height
 				
 				// At the beginning of each row
-				if (!row_start_r && pass_cnt_r >= index_r && pass_cnt_r < index_r + 4) begin
-					row_start_r <= 1'b1;
-					curr_seq_r <= 57'b0;
+				if (!row_start_r && hei_cnt_r > 0) begin
+					if (shift_lsb_r[10:0] == START_CODE && pass_cnt_r - 9'd10 == index_r) begin
+						seq_cnt_r <= 7'd15;
+						row_start_r <= 1'b1;
+						curr_seq_r <= {42'b0, shift_lsb_r[10:0], lsb_w};
+					end
+					else if (shift_lsb_r[11:1] == START_CODE && pass_cnt_r - 9'd11 == index_r) begin
+						seq_cnt_r <= 7'd16;
+						row_start_r <= 1'b1;
+						curr_seq_r <= {41'b0, shift_lsb_r[11:0], lsb_w};
+					end
+					else if (shift_lsb_r[12:2] == START_CODE && pass_cnt_r - 9'd12 == index_r) begin
+						seq_cnt_r <= 7'd17;
+						row_start_r <= 1'b1;
+						curr_seq_r <= {40'b0, shift_lsb_r[12:0], lsb_w};
+					end
 				end
 				
 				// Collect sequence bits in current row
-				if (row_start_r && seq_cnt_r < 57) begin
+				else if (row_start_r && seq_cnt_r < 53) begin
 					if (hei_cnt_r == 0) begin
 						seq_r <= {curr_seq_r[52:0], lsb_w};
 					end
@@ -637,10 +664,10 @@ module core (                       //Don't modify interface
 				end
 				
 				// At end of row
-				if (seq_cnt_r >= 56 && row_start_r) begin
+				else if (seq_cnt_r > 52 && row_start_r) begin
 					if (hei_cnt_r == 4'd0) begin
 						// First row - check if there's stop code
-						if ({curr_seq_r[8:0], lsb_w} != STOP_CODE) begin
+						if (not_stop_w) begin
 							// Invalid - reset
 							start_r <= 1'b0;
 							hei_cnt_r <= 4'd0;
@@ -651,7 +678,12 @@ module core (                       //Don't modify interface
 							curr_seq_r <= 57'd0;
 						end
 						else begin
-							seq_r <= {curr_seq_r[52:0], lsb_w};
+							case (seq_cnt_r)
+								53: seq_r <= {curr_seq_r[52:0], lsb_w};
+								54: seq_r <= {curr_seq_r[53:0], lsb_w[3:1]};
+								55: seq_r <= {curr_seq_r[54:0], lsb_w[3:2]};
+								56: seq_r <= {curr_seq_r[55:0], lsb_w[3]};
+							endcase
 							hei_cnt_r <= 4'd1;
 							seq_cnt_r <= 7'd0;
 							row_start_r <= 1'b0;
@@ -659,7 +691,7 @@ module core (                       //Don't modify interface
 					end
 					else if (hei_cnt_r < 4'd9) begin
 						// Rows 2-9: verify they match first row
-						if (seq_r == {curr_seq_r[52:0], lsb_w}) begin
+						if (is_match_seq_w) begin
 							hei_cnt_r <= hei_cnt_r + 4'd1;
 							seq_cnt_r <= 7'd0;
 							row_start_r <= 1'b0;
@@ -676,7 +708,7 @@ module core (                       //Don't modify interface
 					end
 					else if (hei_cnt_r == 4'd9) begin
 						// 10th row: final validation and decode
-						if (seq_r == {curr_seq_r[52:0], lsb_w}) begin
+						if (is_match_seq_w) begin
 							// Valid 10-row barcode found!
 							if (seq_r[56:46] == START_CODE && seq_r[12:0] == STOP_CODE) begin
 								// Decode parameters
@@ -717,30 +749,30 @@ module core (                       //Don't modify interface
 				// Search for START_CODE in shift register
 				if (shift_lsb_r[10:0] == START_CODE) begin
 					start_r <= 1'b1;
-					seq_cnt_r <= 7'd11;
-					seq_r <= {46'b0, shift_lsb_r[10:0]};
+					seq_cnt_r <= 7'd15;
+					seq_r <= {42'b0, shift_lsb_r[10:0], lsb_w};
 					index_r <= pass_cnt_r - 9'd10;
 					row_start_r <= 1'b1;
 					hei_cnt_r <= 4'd0;
-					curr_seq_r <= {46'b0, shift_lsb_r[10:0]};
+					curr_seq_r <= {42'b0, shift_lsb_r[10:0], lsb_w};
 				end
 				else if (shift_lsb_r[11:1] == START_CODE) begin
 					start_r <= 1'b1;
-					seq_cnt_r <= 7'd12;
-					seq_r <= {45'b0, shift_lsb_r[11:0]};
+					seq_cnt_r <= 7'd16;
+					seq_r <= {41'b0, shift_lsb_r[11:0], lsb_w};
 					index_r <= pass_cnt_r - 9'd11;
 					row_start_r <= 1'b1;
 					hei_cnt_r <= 4'd0;
-					curr_seq_r <= {45'b0, shift_lsb_r[11:0]};
+					curr_seq_r <= {41'b0, shift_lsb_r[11:0], lsb_w};
 				end
 				else if (shift_lsb_r[12:2] == START_CODE) begin
 					start_r <= 1'b1;
-					seq_cnt_r <= 7'd13;
-					seq_r <= {44'b0, shift_lsb_r[12:0]};
+					seq_cnt_r <= 7'd17;
+					seq_r <= {40'b0, shift_lsb_r[12:0], lsb_w};
 					index_r <= pass_cnt_r - 9'd12;
 					row_start_r <= 1'b1;
 					hei_cnt_r <= 4'd0;
-					curr_seq_r <= {44'b0, shift_lsb_r[12:0]};
+					curr_seq_r <= {40'b0, shift_lsb_r[12:0], lsb_w};
 				end
 			end
 		end
