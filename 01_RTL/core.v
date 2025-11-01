@@ -52,16 +52,25 @@ module core (                       //Don't modify interface
 	// ============================================================================
 	// FSM States
 	// ============================================================================
-	localparam S_IDLE      = 3'b000;
-	localparam S_IMG       = 3'b001;
-	localparam S_WEI       = 3'b010;
-	localparam S_CONV      = 3'b011;
-	localparam S_BUFF      = 3'b100;
-	localparam S_CONV_INIT = 3'b101;
-	localparam S_DONE      = 3'b110;
-	localparam S_CONV_BUFF = 3'b111;
+	localparam S_IDLE        = 5'b00000;
+	localparam S_IMG         = 5'b00001;
+	localparam S_BUFF        = 5'b00010;
+	localparam S_WEI         = 5'b00011;
+	localparam S_CONV11_INIT = 5'b00100;
+	localparam S_CONV11      = 5'b00101;
+	localparam S_CONV11_BUFF = 5'b00110;
+	localparam S_DONE        = 5'b00111;
+	localparam S_CONV12_INIT = 5'b01000;
+	localparam S_CONV12      = 5'b01001;
+	localparam S_CONV12_BUFF = 5'b01010;
+	localparam S_CONV21_INIT = 5'b01011;
+	localparam S_CONV21      = 5'b01100;
+	localparam S_CONV21_BUFF = 5'b01101;
+	localparam S_CONV22_INIT = 5'b01110;
+	localparam S_CONV22      = 5'b01111;
+	localparam S_CONV22_BUFF = 5'b10000;
 
-	reg [2:0] state_r, next_state_w;
+	reg [4:0] state_r, next_state_w;
 
 	// ============================================================================
 	// Code 128-C Barcode Constants
@@ -82,7 +91,7 @@ module core (                       //Don't modify interface
 	reg [8:0]  index_r;
 	reg [56:0] seq_r;
 	reg [56:0] curr_seq_r;
-	reg [2:0]  ker_r, str_r, dil_r;
+	reg [1:0]  ker_r, str_r, dil_r;
 	reg        start_r, row_start_r, barcode_done_r;
 
 	// Barcode Decoding (Combinational Wires)
@@ -299,16 +308,23 @@ module core (                       //Don't modify interface
 					end
 					1: begin
 						if (dil_r == 2'd1) begin
-							img_addr_w[0] = img_addr_r[0] + dil_r;
-							img_addr_w[1] = img_addr_r[1] + dil_r;
+							img_addr_w[0] = img_addr_r[0] + 1;
+							img_addr_w[1] = img_addr_r[1] + 1;
 						end
 						else begin
-							img_addr_w[0] = img_addr_r[0] + dil_r;
-							img_addr_w[2] = img_addr_r[2] + dil_r;
+							img_addr_w[0] = img_addr_r[0] + 2;
+							img_addr_w[2] = img_addr_r[2] + 2;
 						end
 					end
 					2: begin
-						next_state_w = S_CONV_INIT;
+						case ({str_r, dil_r})
+							4'b0101: next_state_w = S_CONV11_INIT; 
+							4'b0110: next_state_w = S_CONV12_INIT;
+							4'b1001: next_state_w = S_CONV21_INIT;
+							4'b1010: next_state_w = S_CONV22_INIT;
+							default: next_state_w = state_r;
+						endcase
+
 						// Top row - all zeros (padding)
 						mul_w[0] = 8'd0;
 						mul_w[1] = 8'd0;
@@ -321,7 +337,7 @@ module core (                       //Don't modify interface
 						buff1_w = sram_packed_w[0 +: 8];
 						buff2_w = (dil_r == 1) ? sram_packed_w[8 +: 8] : sram_packed_w[16 +: 8];
 						
-						// Bottom row - zeros (will load in first S_CONV_INIT cycle)
+						// Bottom row - zeros (will load in first S_CONV11_INIT cycle)
 						mul_w[6] = 8'd0;
 						mul_w[7] = 8'd0;
 						mul_w[8] = 8'd0;
@@ -340,10 +356,10 @@ module core (                       //Don't modify interface
 			end
 			
 			// ====================================================================
-			// S_CONV_INIT: Initialize window for new column
+			// S_CONV11_INIT: Initialize window for new column
 			// ====================================================================
-			S_CONV_INIT: begin
-				next_state_w = S_CONV;
+			S_CONV11_INIT: begin
+				next_state_w = S_CONV11;
 				row_cnt_w = 6'd1;
 				startup_delay_w = 1;
 				
@@ -362,104 +378,56 @@ module core (                       //Don't modify interface
 				mul_w[7] = sram_packed_w[bit_index_w +: 8];
 				mul_w[8] = extract_with_pad(win_col_right);
 				
-				if (dil_r == 2'd1) begin
-					// Dilation = 1
-					case (col_cnt_r[2:0])
-						3'd0: begin
-							img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + str_r;
-							img_addr_w[0] = img_addr_r[0] + str_r;
-							img_addr_w[1] = img_addr_r[1] + str_r;
-						end
-						3'd1: begin
-							img_addr_w[0] = img_addr_r[0] + str_r;
-							img_addr_w[1] = img_addr_r[1] + str_r;
-							img_addr_w[2] = img_addr_r[2] + str_r;
-						end
-						3'd2: begin
-							img_addr_w[1] = img_addr_r[1] + str_r;
-							img_addr_w[2] = img_addr_r[2] + str_r;
-							img_addr_w[3] = img_addr_r[3] + str_r;
-						end
-						3'd3: begin
-							img_addr_w[2] = img_addr_r[2] + str_r;
-							img_addr_w[3] = img_addr_r[3] + str_r;
-							img_addr_w[4] = img_addr_r[4] + str_r;
-						end
-						3'd4: begin
-							img_addr_w[3] = img_addr_r[3] + str_r;
-							img_addr_w[4] = img_addr_r[4] + str_r;
-							img_addr_w[5] = img_addr_r[5] + str_r;
-						end
-						3'd5: begin
-							img_addr_w[4] = img_addr_r[4] + str_r;
-							img_addr_w[5] = img_addr_r[5] + str_r;
-							img_addr_w[6] = img_addr_r[6] + str_r;
-						end
-						3'd6: begin
-							img_addr_w[5] = img_addr_r[5] + str_r;
-							img_addr_w[6] = img_addr_r[6] + str_r;
-							img_addr_w[7] = img_addr_r[7] + str_r;
-						end
-						3'd7: begin
-							img_addr_w[6] = img_addr_r[6] + str_r;
-							img_addr_w[7] = img_addr_r[7] + str_r;
-							img_addr_w[0] = img_addr_r[0] + str_r;
-						end
-					endcase
-				end
-				else begin
-					// Dilation = 2
-					case (col_cnt_r[2:0])
-						3'd0: begin
-							img_addr_w[6] = (col_cnt_r == 0) ? 0: img_addr_r[6] + str_r;
-							img_addr_w[0] = img_addr_r[0] + str_r;
-							img_addr_w[2] = img_addr_r[2] + str_r;
-						end
-						3'd1: begin
-							img_addr_w[7] = (col_cnt_r == 1) ? 0: img_addr_r[7] + str_r;
-							img_addr_w[1] = img_addr_r[1] + str_r;
-							img_addr_w[3] = img_addr_r[3] + str_r;
-						end
-						3'd2: begin
-							img_addr_w[0] = img_addr_r[0] + str_r;
-							img_addr_w[2] = img_addr_r[2] + str_r;
-							img_addr_w[4] = img_addr_r[4] + str_r;
-						end
-						3'd3: begin
-							img_addr_w[1] = img_addr_r[1] + str_r;
-							img_addr_w[3] = img_addr_r[3] + str_r;
-							img_addr_w[5] = img_addr_r[5] + str_r;
-						end
-						3'd4: begin
-							img_addr_w[2] = img_addr_r[2] + str_r;
-							img_addr_w[4] = img_addr_r[4] + str_r;
-							img_addr_w[6] = img_addr_r[6] + str_r;
-						end
-						3'd5: begin
-							img_addr_w[3] = img_addr_r[3] + str_r;
-							img_addr_w[5] = img_addr_r[5] + str_r;
-							img_addr_w[7] = img_addr_r[7] + str_r;
-						end
-						3'd6: begin
-							img_addr_w[4] = img_addr_r[4] + str_r;
-							img_addr_w[6] = img_addr_r[6] + str_r;
-							img_addr_w[0] = img_addr_r[0] + str_r;
-						end
-						3'd7: begin
-							img_addr_w[5] = img_addr_r[5] + str_r;
-							img_addr_w[7] = img_addr_r[7] + str_r;
-							img_addr_w[1] = img_addr_r[1] + str_r;
-						end
-					endcase
-				end
+				case (col_cnt_r[2:0])
+					3'd0: begin
+						img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + 1;
+						img_addr_w[0] = img_addr_r[0] + 1;
+						img_addr_w[1] = img_addr_r[1] + 1;
+					end
+					3'd1: begin
+						img_addr_w[0] = img_addr_r[0] + 1;
+						img_addr_w[1] = img_addr_r[1] + 1;
+						img_addr_w[2] = img_addr_r[2] + 1;
+					end
+					3'd2: begin
+						img_addr_w[1] = img_addr_r[1] + 1;
+						img_addr_w[2] = img_addr_r[2] + 1;
+						img_addr_w[3] = img_addr_r[3] + 1;
+					end
+					3'd3: begin
+						img_addr_w[2] = img_addr_r[2] + 1;
+						img_addr_w[3] = img_addr_r[3] + 1;
+						img_addr_w[4] = img_addr_r[4] + 1;
+					end
+					3'd4: begin
+						img_addr_w[3] = img_addr_r[3] + 1;
+						img_addr_w[4] = img_addr_r[4] + 1;
+						img_addr_w[5] = img_addr_r[5] + 1;
+					end
+					3'd5: begin
+						img_addr_w[4] = img_addr_r[4] + 1;
+						img_addr_w[5] = img_addr_r[5] + 1;
+						img_addr_w[6] = img_addr_r[6] + 1;
+					end
+					3'd6: begin
+						img_addr_w[5] = img_addr_r[5] + 1;
+						img_addr_w[6] = img_addr_r[6] + 1;
+						img_addr_w[7] = img_addr_r[7] + 1;
+					end
+					3'd7: begin
+						img_addr_w[6] = img_addr_r[6] + 1;
+						img_addr_w[7] = img_addr_r[7] + 1;
+						img_addr_w[0] = img_addr_r[0] + 1;
+					end
+				endcase
 			end
 			
 			// ====================================================================
-			// S_CONV: Main convolution loop with edge case handling
+			// S_CONV11: Main convolution loop with edge case handling
 			// ====================================================================
-			S_CONV: begin
-				if (dil1_stop_w || dil2_stop_w) begin
-					row_cnt_w = row_cnt_r + str_r;
+			S_CONV11: begin
+				if (dil1_stop_w) begin
+					row_cnt_w = row_cnt_r + 1;
 					for (i = 0; i < 8; i = i + 1) img_addr_w[i] = img_addr_r[i];
 					startup_delay_w = 2;
 					
@@ -485,8 +453,8 @@ module core (                       //Don't modify interface
 						mul_w[8] = pad_right ? 8'd0 : extract_with_pad(win_col_right);
 					end
 				end
-				else if (dil1_inc_addr_w || dil2_inc_addr_w) begin
-					row_cnt_w = row_cnt_r + str_r;
+				else if (dil1_inc_addr_w) begin
+					row_cnt_w = row_cnt_r + 1;
 					startup_delay_w = 2;
 					
 					// Shift window upward
@@ -510,52 +478,18 @@ module core (                       //Don't modify interface
 						mul_w[7] = sram_packed_w[bit_index_w +: 8];
 						mul_w[8] = pad_right ? 8'd0 : extract_with_pad(win_col_right);
 					end
-					if (dil_r == 1) begin
-						if (str_r == 1) begin
-							case (col_cnt_r[2:0])
-								3'd0: img_addr_w[2] = addr2_reset_w;
-								3'd1: img_addr_w[3] = addr2_reset_w;
-								3'd2: img_addr_w[4] = addr2_reset_w;
-								3'd3: img_addr_w[5] = addr2_reset_w;
-								3'd4: img_addr_w[6] = addr2_reset_w;
-								3'd5: img_addr_w[7] = addr2_reset_w;
-								3'd6: img_addr_w[0] = addr2_reset_w;
-								3'd7: img_addr_w[1] = addr2_reset_w;
-							endcase
-						end
-						else begin // str = 2
-							case(col_cnt_r[2:0]) // synopsys all_case
-								3'd0: img_addr_w[3] = addr2_reset_w;
-								3'd2: img_addr_w[4] = addr2_reset_w;
-								3'd4: img_addr_w[6] = addr2_reset_w;
-								3'd6: img_addr_w[0] = addr2_reset_w;
-							endcase
-						end
-					end
-					else begin  // dil = 2
-						if (str_r == 1) begin
-							case (col_cnt_r[2:0])
-								3'd0: img_addr_w[3] = addr2_reset_w;
-								3'd1: img_addr_w[4] = addr2_reset_w;
-								3'd2: img_addr_w[5] = addr2_reset_w;
-								3'd3: img_addr_w[6] = addr2_reset_w;
-								3'd4: img_addr_w[7] = addr2_reset_w;
-								3'd5: img_addr_w[0] = addr2_reset_w;
-								3'd6: img_addr_w[1] = addr2_reset_w;
-								3'd7: img_addr_w[2] = addr2_reset_w;
-							endcase
-						end
-						else begin
-							case (col_cnt_r[2:0]) // synopsys all_case
-								3'd0: img_addr_w[4] = addr2_reset_w;
-								3'd2: img_addr_w[6] = addr2_reset_w;
-								3'd4: img_addr_w[0] = addr2_reset_w;
-								3'd6: img_addr_w[2] = addr2_reset_w;
-							endcase
-						end
-					end
+					case (col_cnt_r[2:0])
+						3'd0: img_addr_w[2] = addr2_reset_w;
+						3'd1: img_addr_w[3] = addr2_reset_w;
+						3'd2: img_addr_w[4] = addr2_reset_w;
+						3'd3: img_addr_w[5] = addr2_reset_w;
+						3'd4: img_addr_w[6] = addr2_reset_w;
+						3'd5: img_addr_w[7] = addr2_reset_w;
+						3'd6: img_addr_w[0] = addr2_reset_w;
+						3'd7: img_addr_w[1] = addr2_reset_w;
+					endcase
 				end
-				else if (dil1_inc_col_w || dil2_inc_col_w) begin
+				else if (dil1_inc_col_w) begin
 					startup_delay_w = 2;
 					
 					// Shift window upward
@@ -580,154 +514,53 @@ module core (                       //Don't modify interface
 						mul_w[8] = pad_right ? 8'd0 : extract_with_pad(win_col_right);
 					end
 					row_cnt_w = row_cnt_r;
-					next_state_w = S_CONV_BUFF;
-					if (dil_r == 2'd1) begin
-						// Dilation = 1
-						if (str_r == 1) begin
-							case (col_cnt_r[2:0])
-								3'd0: begin
-									img_addr_w[0] = addr0_reset_w + 1;
-									img_addr_w[1] = addr1_reset_w + 1;
-									img_addr_w[2] = addr2_reset_w + 1;
-								end
-								3'd1: begin
-									img_addr_w[1] = addr0_reset_w + 1;
-									img_addr_w[2] = addr1_reset_w + 1;
-									img_addr_w[3] = addr2_reset_w + 1;
-								end
-								3'd2: begin
-									img_addr_w[2] = addr0_reset_w + 1;
-									img_addr_w[3] = addr1_reset_w + 1;
-									img_addr_w[4] = addr2_reset_w + 1;
-								end
-								3'd3: begin
-									img_addr_w[3] = addr0_reset_w + 1;
-									img_addr_w[4] = addr1_reset_w + 1;
-									img_addr_w[5] = addr2_reset_w + 1;
-								end
-								3'd4: begin
-									img_addr_w[4] = addr0_reset_w + 1;
-									img_addr_w[5] = addr1_reset_w + 1;
-									img_addr_w[6] = addr2_reset_w + 1;
-								end
-								3'd5: begin
-									img_addr_w[5] = addr0_reset_w + 1;
-									img_addr_w[6] = addr1_reset_w + 1;
-									img_addr_w[7] = addr2_reset_w + 1;
-								end
-								3'd6: begin
-									img_addr_w[6] = addr0_reset_w + 1;
-									img_addr_w[7] = addr1_reset_w + 1;
-									img_addr_w[0] = addr2_reset_w + 1;
-								end
-								3'd7: begin
-									img_addr_w[7] = addr0_reset_w + 1;
-									img_addr_w[0] = addr1_reset_w + 1;
-									img_addr_w[1] = addr2_reset_w + 1;
-								end
-							endcase
+					next_state_w = S_CONV11_BUFF;
+					case (col_cnt_r[2:0])
+						3'd0: begin
+							img_addr_w[0] = addr0_reset_w + 1;
+							img_addr_w[1] = addr1_reset_w + 1;
+							img_addr_w[2] = addr2_reset_w + 1;
 						end
-						else begin // synopsys all_case
-							case(col_cnt_r[2:0])
-								3'd0: begin
-									img_addr_w[1] = addr0_reset_w + 1;
-									img_addr_w[2] = addr1_reset_w + 1;
-									img_addr_w[3] = addr2_reset_w + 1;
-								end
-								3'd2: begin
-									img_addr_w[2] = addr0_reset_w + 1;
-									img_addr_w[3] = addr1_reset_w + 1;
-									img_addr_w[4] = addr2_reset_w + 1;
-								end
-								3'd4: begin
-									img_addr_w[4] = addr0_reset_w + 1;
-									img_addr_w[5] = addr1_reset_w + 1;
-									img_addr_w[6] = addr2_reset_w + 1;
-								end
-								3'd6: begin
-									img_addr_w[6] = addr0_reset_w + 1;
-									img_addr_w[7] = addr1_reset_w + 1;
-									img_addr_w[0] = addr2_reset_w + 1;
-								end
-							endcase
+						3'd1: begin
+							img_addr_w[1] = addr0_reset_w + 1;
+							img_addr_w[2] = addr1_reset_w + 1;
+							img_addr_w[3] = addr2_reset_w + 1;
 						end
-					end
-					else begin
-						// Dilation = 2
-						if (str_r == 1) begin
-							case (col_cnt_r[2:0])
-								3'd0: begin
-									img_addr_w[7] = (col_cnt_r == 0) ? 0 : addr0_reset_w + 2;
-									img_addr_w[1] = addr1_reset_w + 2;
-									img_addr_w[3] = addr2_reset_w + 2;
-								end
-								3'd1: begin
-									img_addr_w[0] = addr0_reset_w + 2;
-									img_addr_w[2] = addr1_reset_w + 2;
-									img_addr_w[4] = addr2_reset_w + 2;
-								end
-								3'd2: begin
-									img_addr_w[1] = addr0_reset_w + 2;
-									img_addr_w[3] = addr1_reset_w + 2;
-									img_addr_w[5] = addr2_reset_w + 2;
-								end
-								3'd3: begin
-									img_addr_w[2] = addr0_reset_w + 2;
-									img_addr_w[4] = addr1_reset_w + 2;
-									img_addr_w[6] = addr2_reset_w + 2;
-								end
-								3'd4: begin
-									img_addr_w[3] = addr0_reset_w + 2;
-									img_addr_w[5] = addr1_reset_w + 2;
-									img_addr_w[7] = addr2_reset_w + 2;
-								end
-								3'd5: begin
-									img_addr_w[4] = addr0_reset_w + 2;
-									img_addr_w[6] = addr1_reset_w + 2;
-									img_addr_w[0] = addr2_reset_w + 2;
-								end
-								3'd6: begin
-									img_addr_w[5] = addr0_reset_w + 2;
-									img_addr_w[7] = addr1_reset_w + 2;
-									img_addr_w[1] = addr2_reset_w + 2;
-								end
-								3'd7: begin
-									img_addr_w[6] = addr0_reset_w + 2;
-									img_addr_w[0] = addr1_reset_w + 2;
-									img_addr_w[2] = addr2_reset_w + 2;
-								end
-							endcase
+						3'd2: begin
+							img_addr_w[2] = addr0_reset_w + 1;
+							img_addr_w[3] = addr1_reset_w + 1;
+							img_addr_w[4] = addr2_reset_w + 1;
 						end
-						else begin
-							case (col_cnt_r[2:0]) // synopsys all_case
-								3'd0: begin
-									img_addr_w[0] = addr0_reset_w + 2;
-									img_addr_w[2] = addr1_reset_w + 2;
-									img_addr_w[4] = addr2_reset_w + 2;
-								end
-								3'd2: begin
-									img_addr_w[2] = addr0_reset_w + 2;
-									img_addr_w[4] = addr1_reset_w + 2;
-									img_addr_w[6] = addr2_reset_w + 2;
-								end
-								3'd4: begin
-									img_addr_w[4] = addr0_reset_w + 2;
-									img_addr_w[6] = addr1_reset_w + 2;
-									img_addr_w[0] = addr2_reset_w + 2;
-								end
-								3'd6: begin
-									img_addr_w[6] = addr0_reset_w + 2;
-									img_addr_w[0] = addr1_reset_w + 2;
-									img_addr_w[2] = addr2_reset_w + 2;
-								end
-							endcase
+						3'd3: begin
+							img_addr_w[3] = addr0_reset_w + 1;
+							img_addr_w[4] = addr1_reset_w + 1;
+							img_addr_w[5] = addr2_reset_w + 1;
 						end
-					end
-
+						3'd4: begin
+							img_addr_w[4] = addr0_reset_w + 1;
+							img_addr_w[5] = addr1_reset_w + 1;
+							img_addr_w[6] = addr2_reset_w + 1;
+						end
+						3'd5: begin
+							img_addr_w[5] = addr0_reset_w + 1;
+							img_addr_w[6] = addr1_reset_w + 1;
+							img_addr_w[7] = addr2_reset_w + 1;
+						end
+						3'd6: begin
+							img_addr_w[6] = addr0_reset_w + 1;
+							img_addr_w[7] = addr1_reset_w + 1;
+							img_addr_w[0] = addr2_reset_w + 1;
+						end
+						3'd7: begin
+							img_addr_w[7] = addr0_reset_w + 1;
+							img_addr_w[0] = addr1_reset_w + 1;
+							img_addr_w[1] = addr2_reset_w + 1;
+						end
+					endcase
 				end
 				else begin
 					// Continue vertically in same column
-					row_cnt_w = row_cnt_r + str_r;
+					row_cnt_w = row_cnt_r + 1;
 					startup_delay_w = 2;
 					
 					// Shift window upward
@@ -753,103 +586,60 @@ module core (                       //Don't modify interface
 					end
 					
 					// Increment SRAM addresses for next row
-					if (dil_r == 2'd1) begin
-						// Dilation = 1
-						case (col_cnt_r[2:0])
-							3'd0: begin
-								img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + str_r;
-								img_addr_w[0] = img_addr_r[0] + str_r;
-								img_addr_w[1] = img_addr_r[1] + str_r;
-							end
-							3'd1: begin
-								img_addr_w[0] = img_addr_r[0] + str_r;
-								img_addr_w[1] = img_addr_r[1] + str_r;
-								img_addr_w[2] = img_addr_r[2] + str_r;
-							end
-							3'd2: begin
-								img_addr_w[1] = img_addr_r[1] + str_r;
-								img_addr_w[2] = img_addr_r[2] + str_r;
-								img_addr_w[3] = img_addr_r[3] + str_r;
-							end
-							3'd3: begin
-								img_addr_w[2] = img_addr_r[2] + str_r;
-								img_addr_w[3] = img_addr_r[3] + str_r;
-								img_addr_w[4] = img_addr_r[4] + str_r;
-							end
-							3'd4: begin
-								img_addr_w[3] = img_addr_r[3] + str_r;
-								img_addr_w[4] = img_addr_r[4] + str_r;
-								img_addr_w[5] = img_addr_r[5] + str_r;
-							end
-							3'd5: begin
-								img_addr_w[4] = img_addr_r[4] + str_r;
-								img_addr_w[5] = img_addr_r[5] + str_r;
-								img_addr_w[6] = img_addr_r[6] + str_r;
-							end
-							3'd6: begin
-								img_addr_w[5] = img_addr_r[5] + str_r;
-								img_addr_w[6] = img_addr_r[6] + str_r;
-								img_addr_w[7] = img_addr_r[7] + str_r;
-							end
-							3'd7: begin
-								img_addr_w[6] = img_addr_r[6] + str_r;
-								img_addr_w[7] = img_addr_r[7] + str_r;
-								img_addr_w[0] = img_addr_r[0] + str_r;
-							end
-						endcase
-					end
-					else begin
-						// Dilation = 2
-						case (col_cnt_r[2:0])
-							3'd0: begin
-								img_addr_w[6] = (col_cnt_r == 0) ? 0 : img_addr_r[6] + str_r;
-								img_addr_w[0] = img_addr_r[0] + str_r;
-								img_addr_w[2] = img_addr_r[2] + str_r;
-							end
-							3'd2: begin
-								img_addr_w[0] = img_addr_r[0] + str_r;
-								img_addr_w[2] = img_addr_r[2] + str_r;
-								img_addr_w[4] = img_addr_r[4] + str_r;
-							end
-							3'd1, 3'd3: begin
-								img_addr_w[1] = img_addr_r[1] + str_r;
-								img_addr_w[3] = img_addr_r[3] + str_r;
-								img_addr_w[5] = img_addr_r[5] + str_r;
-							end
-							3'd4: begin
-								img_addr_w[2] = img_addr_r[2] + str_r;
-								img_addr_w[4] = img_addr_r[4] + str_r;
-								img_addr_w[6] = img_addr_r[6] + str_r;
-							end
-							3'd5: begin
-								img_addr_w[3] = img_addr_r[3] + str_r;
-								img_addr_w[5] = img_addr_r[5] + str_r;
-								img_addr_w[7] = img_addr_r[7] + str_r;
-							end
-							3'd6: begin
-								img_addr_w[4] = img_addr_r[4] + str_r;
-								img_addr_w[6] = img_addr_r[6] + str_r;
-								img_addr_w[0] = img_addr_r[0] + str_r;
-							end
-							3'd7: begin
-								img_addr_w[5] = img_addr_r[5] + str_r;
-								img_addr_w[7] = img_addr_r[7] + str_r;
-								img_addr_w[1] = img_addr_r[1] + str_r;
-							end
-						endcase
-					end
+					case (col_cnt_r[2:0])
+						3'd0: begin
+							img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + 1;
+							img_addr_w[0] = img_addr_r[0] + 1;
+							img_addr_w[1] = img_addr_r[1] + 1;
+						end
+						3'd1: begin
+							img_addr_w[0] = img_addr_r[0] + 1;
+							img_addr_w[1] = img_addr_r[1] + 1;
+							img_addr_w[2] = img_addr_r[2] + 1;
+						end
+						3'd2: begin
+							img_addr_w[1] = img_addr_r[1] + 1;
+							img_addr_w[2] = img_addr_r[2] + 1;
+							img_addr_w[3] = img_addr_r[3] + 1;
+						end
+						3'd3: begin
+							img_addr_w[2] = img_addr_r[2] + 1;
+							img_addr_w[3] = img_addr_r[3] + 1;
+							img_addr_w[4] = img_addr_r[4] + 1;
+						end
+						3'd4: begin
+							img_addr_w[3] = img_addr_r[3] + 1;
+							img_addr_w[4] = img_addr_r[4] + 1;
+							img_addr_w[5] = img_addr_r[5] + 1;
+						end
+						3'd5: begin
+							img_addr_w[4] = img_addr_r[4] + 1;
+							img_addr_w[5] = img_addr_r[5] + 1;
+							img_addr_w[6] = img_addr_r[6] + 1;
+						end
+						3'd6: begin
+							img_addr_w[5] = img_addr_r[5] + 1;
+							img_addr_w[6] = img_addr_r[6] + 1;
+							img_addr_w[7] = img_addr_r[7] + 1;
+						end
+						3'd7: begin
+							img_addr_w[6] = img_addr_r[6] + 1;
+							img_addr_w[7] = img_addr_r[7] + 1;
+							img_addr_w[0] = img_addr_r[0] + 1;
+						end
+					endcase
 				end
 			end
-			S_CONV_BUFF: begin
+			S_CONV11_BUFF: begin
 				if (conv_done_w) begin
 					next_state_w = S_DONE;
 				end
 				else begin
-					next_state_w = S_CONV_INIT;
+					next_state_w = S_CONV11_INIT;
 					// Move to next column
 					row_cnt_w = 6'd0;
-					col_cnt_w = col_cnt_r + str_r;
-					next_state_w = S_CONV_INIT;
+					col_cnt_w = col_cnt_r + 1;
+					next_state_w = S_CONV11_INIT;
 					startup_delay_w = 0;
 
 					mul_w[0] = 8'd0;
@@ -863,152 +653,52 @@ module core (                       //Don't modify interface
 					buff1_w = buff2_r;
 					buff2_w = extract_with_pad(win_next_col_right);
 					
-					// Bottom row - zeros (will load in S_CONV_INIT cycle)
+					// Bottom row - zeros (will load in S_CONV11_INIT cycle)
 					mul_w[6] = 8'd0;
 					mul_w[7] = 8'd0;
 					mul_w[8] = 8'd0;
-					if (dil_r == 2'd1) begin
-						// Dilation = 1
-						if (str_r == 1) begin
-							case (col_cnt_r[2:0])
-								3'd0: begin
-									img_addr_w[0] = img_addr_r[0] + 1;
-									img_addr_w[1] = img_addr_r[1] + 1;
-									img_addr_w[2] = img_addr_r[2] + 1;
-								end
-								3'd1: begin
-									img_addr_w[1] = img_addr_r[1] + 1;
-									img_addr_w[2] = img_addr_r[2] + 1;
-									img_addr_w[3] = img_addr_r[3] + 1;
-								end
-								3'd2: begin
-									img_addr_w[2] = img_addr_r[2] + 1;
-									img_addr_w[3] = img_addr_r[3] + 1;
-									img_addr_w[4] = img_addr_r[4] + 1;
-								end
-								3'd3: begin
-									img_addr_w[3] = img_addr_r[3] + 1;
-									img_addr_w[4] = img_addr_r[4] + 1;
-									img_addr_w[5] = img_addr_r[5] + 1;
-								end
-								3'd4: begin
-									img_addr_w[4] = img_addr_r[4] + 1;
-									img_addr_w[5] = img_addr_r[5] + 1;
-									img_addr_w[6] = img_addr_r[6] + 1;
-								end
-								3'd5: begin
-									img_addr_w[5] = img_addr_r[5] + 1;
-									img_addr_w[6] = img_addr_r[6] + 1;
-									img_addr_w[7] = img_addr_r[7] + 1;
-								end
-								3'd6: begin
-									img_addr_w[6] = img_addr_r[6] + 1;
-									img_addr_w[7] = img_addr_r[7] + 1;
-									img_addr_w[0] = img_addr_r[0] + 1;
-								end
-								3'd7: begin
-									img_addr_w[7] = img_addr_r[7] + 1;
-									img_addr_w[0] = img_addr_r[0] + 1;
-									img_addr_w[1] = img_addr_r[1] + 1;
-								end
-							endcase
+					case (col_cnt_r[2:0])
+						3'd0: begin
+							img_addr_w[0] = img_addr_r[0] + 1;
+							img_addr_w[1] = img_addr_r[1] + 1;
+							img_addr_w[2] = img_addr_r[2] + 1;
 						end
-						else begin // synopsys all_case
-							case(col_cnt_r[2:0])
-								3'd0: begin
-									img_addr_w[1] = img_addr_r[1] + 1;
-									img_addr_w[2] = img_addr_r[2] + 1;
-									img_addr_w[3] = img_addr_r[3] + 1;
-								end
-								3'd2: begin
-									img_addr_w[2] = img_addr_r[2] + 1;
-									img_addr_w[3] = img_addr_r[3] + 1;
-									img_addr_w[4] = img_addr_r[4] + 1;
-								end
-								3'd4: begin
-									img_addr_w[4] = img_addr_r[4] + 1;
-									img_addr_w[5] = img_addr_r[5] + 1;
-									img_addr_w[6] = img_addr_r[6] + 1;
-								end
-								3'd6: begin
-									img_addr_w[6] = img_addr_r[6] + 1;
-									img_addr_w[7] = img_addr_r[7] + 1;
-									img_addr_w[0] = img_addr_r[0] + 1;
-								end
-							endcase
+						3'd1: begin
+							img_addr_w[1] = img_addr_r[1] + 1;
+							img_addr_w[2] = img_addr_r[2] + 1;
+							img_addr_w[3] = img_addr_r[3] + 1;
 						end
-					end
-					else begin
-						// Dilation = 2
-						if (str_r == 1) begin
-							case (col_cnt_r[2:0])
-								3'd0: begin
-									img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + 2;
-									img_addr_w[1] = img_addr_r[1] + 2;
-									img_addr_w[3] = img_addr_r[3] + 2;
-								end
-								3'd1: begin
-									img_addr_w[0] = img_addr_r[0] + 2;
-									img_addr_w[2] = img_addr_r[2] + 2;
-									img_addr_w[4] = img_addr_r[4] + 2;
-								end
-								3'd2: begin
-									img_addr_w[1] = img_addr_r[1] + 2;
-									img_addr_w[3] = img_addr_r[3] + 2;
-									img_addr_w[5] = img_addr_r[5] + 2;
-								end
-								3'd3: begin
-									img_addr_w[2] = img_addr_r[2] + 2;
-									img_addr_w[4] = img_addr_r[4] + 2;
-									img_addr_w[6] = img_addr_r[6] + 2;
-								end
-								3'd4: begin
-									img_addr_w[3] = img_addr_r[3] + 2;
-									img_addr_w[5] = img_addr_r[5] + 2;
-									img_addr_w[7] = img_addr_r[7] + 2;
-								end
-								3'd5: begin
-									img_addr_w[4] = img_addr_r[4] + 2;
-									img_addr_w[6] = img_addr_r[6] + 2;
-									img_addr_w[0] = img_addr_r[0] + 2;
-								end
-								3'd6: begin
-									img_addr_w[5] = img_addr_r[5] + 2;
-									img_addr_w[7] = img_addr_r[7] + 2;
-									img_addr_w[1] = img_addr_r[1] + 2;
-								end
-								3'd7: begin
-									img_addr_w[6] = img_addr_r[6] + 2;
-									img_addr_w[0] = img_addr_r[0] + 2;
-									img_addr_w[2] = img_addr_r[2] + 2;
-								end
-							endcase
+						3'd2: begin
+							img_addr_w[2] = img_addr_r[2] + 1;
+							img_addr_w[3] = img_addr_r[3] + 1;
+							img_addr_w[4] = img_addr_r[4] + 1;
 						end
-						else begin
-							case (col_cnt_r[2:0]) // synopsys all_case
-								3'd0: begin
-									img_addr_w[0] = img_addr_r[0] + 2;
-									img_addr_w[2] = img_addr_r[2] + 2;
-									img_addr_w[4] = img_addr_r[4] + 2;
-								end
-								3'd2: begin
-									img_addr_w[2] = img_addr_r[2] + 2;
-									img_addr_w[4] = img_addr_r[4] + 2;
-									img_addr_w[6] = img_addr_r[6] + 2;
-								end
-								3'd4: begin
-									img_addr_w[4] = img_addr_r[4] + 2;
-									img_addr_w[6] = img_addr_r[6] + 2;
-									img_addr_w[0] = img_addr_r[0] + 2;
-								end
-								3'd6: begin
-									img_addr_w[6] = img_addr_r[6] + 2;
-									img_addr_w[0] = img_addr_r[0] + 2;
-									img_addr_w[2] = img_addr_r[2] + 2;
-								end
-							endcase
+						3'd3: begin
+							img_addr_w[3] = img_addr_r[3] + 1;
+							img_addr_w[4] = img_addr_r[4] + 1;
+							img_addr_w[5] = img_addr_r[5] + 1;
 						end
-					end
+						3'd4: begin
+							img_addr_w[4] = img_addr_r[4] + 1;
+							img_addr_w[5] = img_addr_r[5] + 1;
+							img_addr_w[6] = img_addr_r[6] + 1;
+						end
+						3'd5: begin
+							img_addr_w[5] = img_addr_r[5] + 1;
+							img_addr_w[6] = img_addr_r[6] + 1;
+							img_addr_w[7] = img_addr_r[7] + 1;
+						end
+						3'd6: begin
+							img_addr_w[6] = img_addr_r[6] + 1;
+							img_addr_w[7] = img_addr_r[7] + 1;
+							img_addr_w[0] = img_addr_r[0] + 1;
+						end
+						3'd7: begin
+							img_addr_w[7] = img_addr_r[7] + 1;
+							img_addr_w[0] = img_addr_r[0] + 1;
+							img_addr_w[1] = img_addr_r[1] + 1;
+						end
+					endcase
 				end
 			end
 			
@@ -1067,9 +757,9 @@ module core (                       //Don't modify interface
 			index_r <= 9'd0;
 			seq_r <= 57'd0;
 			curr_seq_r <= 57'd0;
-			ker_r <= 3'd0;
-			str_r <= 3'd0;
-			dil_r <= 3'd0;
+			ker_r <= 2'd0;
+			str_r <= 2'd0;
+			dil_r <= 2'd0;
 			start_r <= 1'b0;
 			row_start_r <= 1'b0;
 			barcode_done_r <= 1'b0;
@@ -1177,19 +867,19 @@ module core (                       //Don't modify interface
 								dil_r <= decoded_input(seq_r[23:13]);
 								
 								// Validate: K must be 3, S and D must be non-zero
-								if (decoded_input(seq_r[45:35]) != 3'd3 || 
-								    decoded_input(seq_r[34:24]) == 3'd0 || 
-								    decoded_input(seq_r[23:13]) == 3'd0) begin
-									ker_r <= 3'd0;
-									str_r <= 3'd0;
-									dil_r <= 3'd0;
+								if (decoded_input(seq_r[45:35]) != 2'd3 || 
+								    decoded_input(seq_r[34:24]) == 2'd0 || 
+								    decoded_input(seq_r[23:13]) == 2'd0) begin
+									ker_r <= 2'd0;
+									str_r <= 2'd0;
+									dil_r <= 2'd0;
 								end
 							end
 							else begin
 								// Invalid START/STOP
-								ker_r <= 3'd0;
-								str_r <= 3'd0;
-								dil_r <= 3'd0;
+								ker_r <= 2'd0;
+								str_r <= 2'd0;
+								dil_r <= 2'd0;
 							end
 							barcode_done_r <= 1'b1;
 						end
@@ -1395,11 +1085,11 @@ module core (                       //Don't modify interface
 				S_WEI: begin
 					o_in_ready_r <= 1'b1;
 				end
-				S_CONV_INIT: begin
+				S_CONV11_INIT: begin
 					o_in_ready_r <= 1'b0;
 					// startup_delay_r <= 3'd1;
 				end
-				S_CONV: begin
+				S_CONV11: begin
 					if (startup_delay_r >= 1) begin
 						o_out_valid1_r <= 1'b1;
 						o_out_data1_r <= acc_clamped_w;
@@ -1410,7 +1100,7 @@ module core (                       //Don't modify interface
 						
 					end
 				end
-				S_CONV_BUFF: begin
+				S_CONV11_BUFF: begin
 					o_out_valid1_r <= 1'b1;
 					o_out_data1_r <= acc_clamped_w;
 					o_out_addr1_r <= {row_cnt_r, col_cnt_r};
@@ -1427,14 +1117,14 @@ module core (                       //Don't modify interface
 	// ============================================================================
 	// Function: Decode Code 128-C to number
 	// ============================================================================
-	function automatic [2:0] decoded_input;
+	function automatic [1:0] decoded_input;
 		input [10:0] i_data;
 		begin
 			case (i_data)
-				ONE_CODE:   decoded_input = 3'd1;
-				TWO_CODE:   decoded_input = 3'd2;
-				THREE_CODE: decoded_input = 3'd3;
-				default:    decoded_input = 3'd0;
+				ONE_CODE:   decoded_input = 2'd1;
+				TWO_CODE:   decoded_input = 2'd2;
+				THREE_CODE: decoded_input = 2'd3;
+				default:    decoded_input = 2'd0;
 			endcase
 		end
 	endfunction
