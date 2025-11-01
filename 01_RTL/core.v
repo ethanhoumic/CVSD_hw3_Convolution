@@ -59,6 +59,7 @@ module core (                       //Don't modify interface
 	localparam S_BUFF      = 3'b100;
 	localparam S_CONV_INIT = 3'b101;
 	localparam S_DONE      = 3'b110;
+	localparam S_CONV_BUFF = 3'b111;
 
 	reg [2:0] state_r, next_state_w;
 
@@ -184,6 +185,8 @@ module core (                       //Don't modify interface
 	                        img_out_w[3], img_out_w[2], img_out_w[1], img_out_w[0]};
 
 	// Boundary detection
+	wire dil1_stop_w = (dil_r == 2'd1) && (row_cnt_r == 6'd61);
+	wire dil2_stop_w = (dil_r == 2'd2) && (row_cnt_r == 6'd29);
 	wire dil1_inc_addr_w = (dil_r == 2'd1) && (row_cnt_r == 6'd62);
 	wire dil2_inc_addr_w = (dil_r == 2'd2) && (row_cnt_r == 6'd30);
 	wire dil1_inc_col_w = (dil_r == 2'd1) && (row_cnt_r == 6'd63);
@@ -198,7 +201,7 @@ module core (                       //Don't modify interface
 	wire signed [7:0] win_row_bot   = $signed({1'b0, row_cnt_r}) + $signed({6'b0, str_r}) + $signed({6'b0, dil_r});
 	wire pad_left   = (win_col_left < 8'sd0);
 	wire pad_right  = (win_col_right > 8'sd63);
-	wire pad_bottom = (win_row_bot > 8'sd63);
+	wire pad_bottom = (win_row_bot - 1 > 8'sd63);
 	wire [7:0] bit_index_w = col_cnt_r[2:0] << 3;
 
 	// Other look-ahead logic
@@ -301,7 +304,7 @@ module core (                       //Don't modify interface
 						end
 						else begin
 							img_addr_w[0] = img_addr_r[0] + dil_r;
-							img_addr_w[2] = img_addr_r[2] + dil_r;  // todo: update addr increment
+							img_addr_w[2] = img_addr_r[2] + dil_r;
 						end
 					end
 					2: begin
@@ -333,19 +336,6 @@ module core (                       //Don't modify interface
 							img_addr_w[2] = img_addr_r[2] + dil_r;
 						end
 					end
-				// else begin
-				// 	mul_w[6] = img_out_w;
-				// 	mul_w[7] = 8'd0;
-				// 	mul_w[8] = 8'd0;
-				// 	if (dil_r == 2'd1) begin
-				// 		img_addr_w[0] = img_addr_r[0] + dil_r;
-				// 		img_addr_w[1] = img_addr_r[1] + dil_r;
-				// 	end
-				// 	else begin
-				// 		img_addr_w[0] = img_addr_r[0] + dil_r;
-				// 		img_addr_w[2] = img_addr_r[2] + dil_r;
-				// 	end
-				// end
 				endcase
 			end
 			
@@ -426,6 +416,7 @@ module core (                       //Don't modify interface
 							img_addr_w[2] = img_addr_r[2] + str_r;
 						end
 						3'd1: begin
+							img_addr_w[7] = (col_cnt_r == 1) ? 0: img_addr_r[7] + str_r;
 							img_addr_w[1] = img_addr_r[1] + str_r;
 							img_addr_w[3] = img_addr_r[3] + str_r;
 						end
@@ -467,11 +458,129 @@ module core (                       //Don't modify interface
 			// S_CONV: Main convolution loop with edge case handling
 			// ====================================================================
 			S_CONV: begin
-				if (conv_done_w) begin
-					next_state_w = S_DONE;
+				if (dil1_stop_w || dil2_stop_w) begin
+					row_cnt_w = row_cnt_r + str_r;
+					for (i = 0; i < 8; i = i + 1) img_addr_w[i] = img_addr_r[i];
+					startup_delay_w = 2;
+					
+					// Shift window upward
+					mul_w[0] = mul_r[3];
+					mul_w[1] = mul_r[4];
+					mul_w[2] = mul_r[5];
+					mul_w[3] = mul_r[6];
+					mul_w[4] = mul_r[7];
+					mul_w[5] = mul_r[8];
+					
+					// Load new bottom row from SRAM with edge detection
+					if (pad_bottom) begin
+						// Bottom edge - all zeros
+						mul_w[6] = 8'd0;
+						mul_w[7] = 8'd0;
+						mul_w[8] = 8'd0;
+					end
+					else begin
+						// Not at bottom edge - extract with left/right edge detection
+						mul_w[6] = pad_left  ? 8'd0 : extract_with_pad(win_col_left);
+						mul_w[7] = sram_packed_w[bit_index_w +: 8];
+						mul_w[8] = pad_right ? 8'd0 : extract_with_pad(win_col_right);
+					end
 				end
 				else if (dil1_inc_addr_w || dil2_inc_addr_w) begin
 					row_cnt_w = row_cnt_r + str_r;
+					startup_delay_w = 2;
+					
+					// Shift window upward
+					mul_w[0] = mul_r[3];
+					mul_w[1] = mul_r[4];
+					mul_w[2] = mul_r[5];
+					mul_w[3] = mul_r[6];
+					mul_w[4] = mul_r[7];
+					mul_w[5] = mul_r[8];
+					
+					// Load new bottom row from SRAM with edge detection
+					if (pad_bottom) begin
+						// Bottom edge - all zeros
+						mul_w[6] = 8'd0;
+						mul_w[7] = 8'd0;
+						mul_w[8] = 8'd0;
+					end
+					else begin
+						// Not at bottom edge - extract with left/right edge detection
+						mul_w[6] = pad_left  ? 8'd0 : extract_with_pad(win_col_left);
+						mul_w[7] = sram_packed_w[bit_index_w +: 8];
+						mul_w[8] = pad_right ? 8'd0 : extract_with_pad(win_col_right);
+					end
+					if (dil_r == 1) begin
+						if (str_r == 1) begin
+							case (col_cnt_r[2:0])
+								3'd0: img_addr_w[2] = addr2_reset_w;
+								3'd1: img_addr_w[3] = addr2_reset_w;
+								3'd2: img_addr_w[4] = addr2_reset_w;
+								3'd3: img_addr_w[5] = addr2_reset_w;
+								3'd4: img_addr_w[6] = addr2_reset_w;
+								3'd5: img_addr_w[7] = addr2_reset_w;
+								3'd6: img_addr_w[0] = addr2_reset_w;
+								3'd7: img_addr_w[1] = addr2_reset_w;
+							endcase
+						end
+						else begin // str = 2
+							case(col_cnt_r[2:0]) // synopsys all_case
+								3'd0: img_addr_w[3] = addr2_reset_w;
+								3'd2: img_addr_w[4] = addr2_reset_w;
+								3'd4: img_addr_w[6] = addr2_reset_w;
+								3'd6: img_addr_w[0] = addr2_reset_w;
+							endcase
+						end
+					end
+					else begin  // dil = 2
+						if (str_r == 1) begin
+							case (col_cnt_r[2:0])
+								3'd0: img_addr_w[3] = addr2_reset_w;
+								3'd1: img_addr_w[4] = addr2_reset_w;
+								3'd2: img_addr_w[5] = addr2_reset_w;
+								3'd3: img_addr_w[6] = addr2_reset_w;
+								3'd4: img_addr_w[7] = addr2_reset_w;
+								3'd5: img_addr_w[0] = addr2_reset_w;
+								3'd6: img_addr_w[1] = addr2_reset_w;
+								3'd7: img_addr_w[2] = addr2_reset_w;
+							endcase
+						end
+						else begin
+							case (col_cnt_r[2:0]) // synopsys all_case
+								3'd0: img_addr_w[4] = addr2_reset_w;
+								3'd2: img_addr_w[6] = addr2_reset_w;
+								3'd4: img_addr_w[0] = addr2_reset_w;
+								3'd6: img_addr_w[2] = addr2_reset_w;
+							endcase
+						end
+					end
+				end
+				else if (dil1_inc_col_w || dil2_inc_col_w) begin
+					startup_delay_w = 2;
+					
+					// Shift window upward
+					mul_w[0] = mul_r[3];
+					mul_w[1] = mul_r[4];
+					mul_w[2] = mul_r[5];
+					mul_w[3] = mul_r[6];
+					mul_w[4] = mul_r[7];
+					mul_w[5] = mul_r[8];
+					
+					// Load new bottom row from SRAM with edge detection
+					if (pad_bottom) begin
+						// Bottom edge - all zeros
+						mul_w[6] = 8'd0;
+						mul_w[7] = 8'd0;
+						mul_w[8] = 8'd0;
+					end
+					else begin
+						// Not at bottom edge - extract with left/right edge detection
+						mul_w[6] = pad_left  ? 8'd0 : extract_with_pad(win_col_left);
+						mul_w[7] = sram_packed_w[bit_index_w +: 8];
+						mul_w[8] = pad_right ? 8'd0 : extract_with_pad(win_col_right);
+					end
+					row_cnt_w = row_cnt_r;
+					next_state_w = S_CONV_BUFF;
 					if (dil_r == 2'd1) begin
 						// Dilation = 1
 						if (str_r == 1) begin
@@ -549,8 +658,8 @@ module core (                       //Don't modify interface
 							case (col_cnt_r[2:0])
 								3'd0: begin
 									img_addr_w[7] = (col_cnt_r == 0) ? 0 : addr0_reset_w + 2;
-									img_addr_w[1] = addr1_reset_w + 22;
-									img_addr_w[3] = addr2_reset_w + 22;
+									img_addr_w[1] = addr1_reset_w + 2;
+									img_addr_w[3] = addr2_reset_w + 2;
 								end
 								3'd1: begin
 									img_addr_w[0] = addr0_reset_w + 2;
@@ -614,8 +723,129 @@ module core (                       //Don't modify interface
 							endcase
 						end
 					end
+
 				end
-				else if (dil1_inc_col_w || dil2_inc_col_w) begin
+				else begin
+					// Continue vertically in same column
+					row_cnt_w = row_cnt_r + str_r;
+					startup_delay_w = 2;
+					
+					// Shift window upward
+					mul_w[0] = mul_r[3];
+					mul_w[1] = mul_r[4];
+					mul_w[2] = mul_r[5];
+					mul_w[3] = mul_r[6];
+					mul_w[4] = mul_r[7];
+					mul_w[5] = mul_r[8];
+					
+					// Load new bottom row from SRAM with edge detection
+					if (pad_bottom) begin
+						// Bottom edge - all zeros
+						mul_w[6] = 8'd0;
+						mul_w[7] = 8'd0;
+						mul_w[8] = 8'd0;
+					end
+					else begin
+						// Not at bottom edge - extract with left/right edge detection
+						mul_w[6] = pad_left  ? 8'd0 : extract_with_pad(win_col_left);
+						mul_w[7] = sram_packed_w[bit_index_w +: 8];
+						mul_w[8] = pad_right ? 8'd0 : extract_with_pad(win_col_right);
+					end
+					
+					// Increment SRAM addresses for next row
+					if (dil_r == 2'd1) begin
+						// Dilation = 1
+						case (col_cnt_r[2:0])
+							3'd0: begin
+								img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + str_r;
+								img_addr_w[0] = img_addr_r[0] + str_r;
+								img_addr_w[1] = img_addr_r[1] + str_r;
+							end
+							3'd1: begin
+								img_addr_w[0] = img_addr_r[0] + str_r;
+								img_addr_w[1] = img_addr_r[1] + str_r;
+								img_addr_w[2] = img_addr_r[2] + str_r;
+							end
+							3'd2: begin
+								img_addr_w[1] = img_addr_r[1] + str_r;
+								img_addr_w[2] = img_addr_r[2] + str_r;
+								img_addr_w[3] = img_addr_r[3] + str_r;
+							end
+							3'd3: begin
+								img_addr_w[2] = img_addr_r[2] + str_r;
+								img_addr_w[3] = img_addr_r[3] + str_r;
+								img_addr_w[4] = img_addr_r[4] + str_r;
+							end
+							3'd4: begin
+								img_addr_w[3] = img_addr_r[3] + str_r;
+								img_addr_w[4] = img_addr_r[4] + str_r;
+								img_addr_w[5] = img_addr_r[5] + str_r;
+							end
+							3'd5: begin
+								img_addr_w[4] = img_addr_r[4] + str_r;
+								img_addr_w[5] = img_addr_r[5] + str_r;
+								img_addr_w[6] = img_addr_r[6] + str_r;
+							end
+							3'd6: begin
+								img_addr_w[5] = img_addr_r[5] + str_r;
+								img_addr_w[6] = img_addr_r[6] + str_r;
+								img_addr_w[7] = img_addr_r[7] + str_r;
+							end
+							3'd7: begin
+								img_addr_w[6] = img_addr_r[6] + str_r;
+								img_addr_w[7] = img_addr_r[7] + str_r;
+								img_addr_w[0] = img_addr_r[0] + str_r;
+							end
+						endcase
+					end
+					else begin
+						// Dilation = 2
+						case (col_cnt_r[2:0])
+							3'd0: begin
+								img_addr_w[6] = (col_cnt_r == 0) ? 0 : img_addr_r[6] + str_r;
+								img_addr_w[0] = img_addr_r[0] + str_r;
+								img_addr_w[2] = img_addr_r[2] + str_r;
+							end
+							3'd2: begin
+								img_addr_w[0] = img_addr_r[0] + str_r;
+								img_addr_w[2] = img_addr_r[2] + str_r;
+								img_addr_w[4] = img_addr_r[4] + str_r;
+							end
+							3'd1, 3'd3: begin
+								img_addr_w[1] = img_addr_r[1] + str_r;
+								img_addr_w[3] = img_addr_r[3] + str_r;
+								img_addr_w[5] = img_addr_r[5] + str_r;
+							end
+							3'd4: begin
+								img_addr_w[2] = img_addr_r[2] + str_r;
+								img_addr_w[4] = img_addr_r[4] + str_r;
+								img_addr_w[6] = img_addr_r[6] + str_r;
+							end
+							3'd5: begin
+								img_addr_w[3] = img_addr_r[3] + str_r;
+								img_addr_w[5] = img_addr_r[5] + str_r;
+								img_addr_w[7] = img_addr_r[7] + str_r;
+							end
+							3'd6: begin
+								img_addr_w[4] = img_addr_r[4] + str_r;
+								img_addr_w[6] = img_addr_r[6] + str_r;
+								img_addr_w[0] = img_addr_r[0] + str_r;
+							end
+							3'd7: begin
+								img_addr_w[5] = img_addr_r[5] + str_r;
+								img_addr_w[7] = img_addr_r[7] + str_r;
+								img_addr_w[1] = img_addr_r[1] + str_r;
+							end
+						endcase
+					end
+				end
+			end
+			S_CONV_BUFF: begin
+				if (conv_done_w) begin
+					next_state_w = S_DONE;
+				end
+				else begin
+					next_state_w = S_CONV_INIT;
 					// Move to next column
 					row_cnt_w = 6'd0;
 					col_cnt_w = col_cnt_r + str_r;
@@ -778,120 +1008,6 @@ module core (                       //Don't modify interface
 								end
 							endcase
 						end
-					end
-				end
-				else begin
-					// Continue vertically in same column
-					row_cnt_w = row_cnt_r + str_r;
-					startup_delay_w = 2;
-					
-					// Shift window upward
-					mul_w[0] = mul_r[3];
-					mul_w[1] = mul_r[4];
-					mul_w[2] = mul_r[5];
-					mul_w[3] = mul_r[6];
-					mul_w[4] = mul_r[7];
-					mul_w[5] = mul_r[8];
-					
-					// Load new bottom row from SRAM with edge detection
-					if (pad_bottom) begin
-						// Bottom edge - all zeros
-						mul_w[6] = 8'd0;
-						mul_w[7] = 8'd0;
-						mul_w[8] = 8'd0;
-					end
-					else begin
-						// Not at bottom edge - extract with left/right edge detection
-						mul_w[6] = pad_left  ? 8'd0 : extract_with_pad(win_col_left);
-						mul_w[7] = sram_packed_w[bit_index_w +: 8];
-						mul_w[8] = pad_right ? 8'd0 : extract_with_pad(win_col_right);
-					end
-					
-					// Increment SRAM addresses for next row
-					if (dil_r == 2'd1) begin
-						// Dilation = 1
-						case (col_cnt_r[2:0])
-							3'd0: begin
-								img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + str_r;
-								img_addr_w[0] = img_addr_r[0] + str_r;
-								img_addr_w[1] = img_addr_r[1] + str_r;
-							end
-							3'd1: begin
-								img_addr_w[0] = img_addr_r[0] + str_r;
-								img_addr_w[1] = img_addr_r[1] + str_r;
-								img_addr_w[2] = img_addr_r[2] + str_r;
-							end
-							3'd2: begin
-								img_addr_w[1] = img_addr_r[1] + str_r;
-								img_addr_w[2] = img_addr_r[2] + str_r;
-								img_addr_w[3] = img_addr_r[3] + str_r;
-							end
-							3'd3: begin
-								img_addr_w[2] = img_addr_r[2] + str_r;
-								img_addr_w[3] = img_addr_r[3] + str_r;
-								img_addr_w[4] = img_addr_r[4] + str_r;
-							end
-							3'd4: begin
-								img_addr_w[3] = img_addr_r[3] + str_r;
-								img_addr_w[4] = img_addr_r[4] + str_r;
-								img_addr_w[5] = img_addr_r[5] + str_r;
-							end
-							3'd5: begin
-								img_addr_w[4] = img_addr_r[4] + str_r;
-								img_addr_w[5] = img_addr_r[5] + str_r;
-								img_addr_w[6] = img_addr_r[6] + str_r;
-							end
-							3'd6: begin
-								img_addr_w[5] = img_addr_r[5] + str_r;
-								img_addr_w[6] = img_addr_r[6] + str_r;
-								img_addr_w[7] = img_addr_r[7] + str_r;
-							end
-							3'd7: begin
-								img_addr_w[6] = img_addr_r[6] + str_r;
-								img_addr_w[7] = img_addr_r[7] + str_r;
-								img_addr_w[0] = img_addr_r[0] + str_r;
-							end
-						endcase
-					end
-					else begin
-						// Dilation = 2
-						case (col_cnt_r[2:0])
-							3'd0: begin
-								img_addr_w[6] = (col_cnt_r == 0) ? 0 : img_addr_r[6] + str_r;
-								img_addr_w[0] = img_addr_r[0] + str_r;
-								img_addr_w[2] = img_addr_r[2] + str_r;
-							end
-							3'd2: begin
-								img_addr_w[0] = img_addr_r[0] + str_r;
-								img_addr_w[2] = img_addr_r[2] + str_r;
-								img_addr_w[4] = img_addr_r[4] + str_r;
-							end
-							3'd1, 3'd3: begin
-								img_addr_w[1] = img_addr_r[1] + str_r;
-								img_addr_w[3] = img_addr_r[3] + str_r;
-								img_addr_w[5] = img_addr_r[5] + str_r;
-							end
-							3'd4: begin
-								img_addr_w[2] = img_addr_r[2] + str_r;
-								img_addr_w[4] = img_addr_r[4] + str_r;
-								img_addr_w[6] = img_addr_r[6] + str_r;
-							end
-							3'd5: begin
-								img_addr_w[3] = img_addr_r[3] + str_r;
-								img_addr_w[5] = img_addr_r[5] + str_r;
-								img_addr_w[7] = img_addr_r[7] + str_r;
-							end
-							3'd6: begin
-								img_addr_w[4] = img_addr_r[4] + str_r;
-								img_addr_w[6] = img_addr_r[6] + str_r;
-								img_addr_w[0] = img_addr_r[0] + str_r;
-							end
-							3'd7: begin
-								img_addr_w[5] = img_addr_r[5] + str_r;
-								img_addr_w[7] = img_addr_r[7] + str_r;
-								img_addr_w[1] = img_addr_r[1] + str_r;
-							end
-						endcase
 					end
 				end
 			end
@@ -1293,6 +1409,11 @@ module core (                       //Don't modify interface
 					else begin
 						
 					end
+				end
+				S_CONV_BUFF: begin
+					o_out_valid1_r <= 1'b1;
+					o_out_data1_r <= acc_clamped_w;
+					o_out_addr1_r <= {row_cnt_r, col_cnt_r};
 				end
 				S_DONE: begin
 					o_in_ready_r <= 1'b0;
