@@ -87,7 +87,7 @@ module core (                       //Don't modify interface
 	reg [12:0] shift_lsb_r;
 	reg [6:0]  pass_cnt_r;
 	reg [6:0]  seq_cnt_r;
-	reg [3:0]  hei_cnt_r;
+	reg [3:0]  hei_cnt_r, hei_cnt_w;
 	reg [8:0]  index_r;
 	reg [56:0] seq_r;
 	reg [56:0] curr_seq_r;
@@ -135,7 +135,6 @@ module core (                       //Don't modify interface
 	reg        wen_r      [0:7];
 	reg [8:0]  img_addr_r [0:7];
 	reg [7:0]  img_in_r   [0:7];
-	reg        img_done_r;
 	reg [2:0]  img_addr_inc_r, img_addr_inc_w;
 	reg [5:0]  img_addr_offset_r, img_addr_offset_w; 
 
@@ -197,17 +196,14 @@ module core (                       //Don't modify interface
 	wire conv_done_w    = (str1_inc_col_w && col_cnt_r == 6'd63);
 
 	// Padding detection
-	wire signed [7:0] win_col_left  = $signed({1'b0, col_cnt_r}) - $signed({6'b0, dil_r});
-	wire signed [7:0] win_col_right = $signed({1'b0, col_cnt_r}) + $signed({6'b0, dil_r});
+	wire signed [7:0] win_col_left  = $signed({2'b0, col_cnt_r}) - $signed({6'b0, dil_r});
+	wire signed [7:0] win_col_right = $signed({2'b0, col_cnt_r}) + $signed({6'b0, dil_r});
 	wire signed [7:0] win_next_col_right = $signed({1'b0, col_cnt_r}) + 1 + $signed({6'b0, dil_r});  // 1 = str but omitted
 	wire signed [7:0] win_row_bot   = $signed({1'b0, row_cnt_r}) + $signed({6'b0, 1'b1}) + $signed({6'b0, dil_r}); // 1 = str but omitted
 	wire pad_left   = (win_col_left < 8'sd0);
 	wire pad_right  = (win_col_right > 8'sd63);
 	wire pad_bottom = ((dil_r == 1) && (win_row_bot - 1 > 8'sd63)) || (dil_r == 2 && win_row_bot - 2 > 8'sd63);
 	wire [7:0] bit_index_w = col_cnt_r[2:0] << 3;
-	wire [7:0] left_index_w = (col_cnt_r[2:0] - dil_r) << 3;
-	wire [7:0] right_index_w = (col_cnt_r[2:0] + dil_r) << 3;
-
 
 	// Other look-ahead logic
 	wire [8:0] addrf_reset_w = win_col_left[5:3] << 6;
@@ -216,10 +212,10 @@ module core (                       //Don't modify interface
 	wire [8:0] addr2_reset_w = win_next_col_right[5:3] << 6;
 	wire [5:0] row_dec_w = row_cnt_r - 6'd1;
 	wire [5:0] col_dec_w = col_cnt_r - 6'd1;
-	wire [4:0] half_row_w = row_cnt_r >> 1;
-	wire [4:0] half_col_w = col_cnt_r >> 1;
-	wire [4:0] half_row_dec_w = row_dec_w >> 1;
-	wire [4:0] half_col_dec_w = col_dec_w >> 1;
+	wire [5:0] half_row_w = row_cnt_r >> 1;
+	wire [5:0] half_col_w = col_cnt_r >> 1;
+	wire [5:0] half_row_dec_w = row_dec_w >> 1;
+	wire [5:0] half_col_dec_w = col_dec_w >> 1;
 
 	reg [7:0] buff1_r, buff1_w;
 	reg [7:0] buff2_r, buff2_w;
@@ -228,7 +224,7 @@ module core (                       //Don't modify interface
 	// ============================================================================
 	// Function: Extract pixel with padding
 	// ============================================================================
-	function [7:0] extract_with_pad;
+	function automatic [7:0] extract_with_pad;
 		input signed [7:0] col;
 		reg [7:0] index_w;
 		begin
@@ -266,6 +262,36 @@ module core (                       //Don't modify interface
 	reg [7:0]  mul_w [0:8];
 	
 	always @(*) begin
+		hei_cnt_w = hei_cnt_r;
+		if (state_r == S_IDLE && !i_in_valid) hei_cnt_w = 0;
+		else if ((state_r == S_IDLE || state_r == S_IMG) && i_in_valid && !barcode_done_r) begin
+			if (start_r) begin
+				if (seq_cnt_r > 52 && row_start_r) begin
+					if (hei_cnt_r == 0) begin
+						if (not_stop_w) hei_cnt_w = 0;
+						else hei_cnt_w = 1;
+					end
+					else if (hei_cnt_r < 9) begin
+						if (is_match_seq_w) hei_cnt_w = hei_cnt_r + 1;
+						else hei_cnt_w = 0;
+					end
+					else if (hei_cnt_r == 9) begin
+						if (!is_match_seq_w) hei_cnt_w = 0;
+					end
+				end
+			end
+			else hei_cnt_w = 0;
+		end
+	end
+
+	always @(posedge i_clk or negedge i_rst_n) begin
+		if (!i_rst_n) begin
+			hei_cnt_r <= 0;
+		end
+		else hei_cnt_r <= hei_cnt_w;
+	end
+
+	always @(*) begin
 		// Default assignments
 		next_state_w = state_r;
 		row_cnt_w = row_cnt_r;
@@ -282,8 +308,7 @@ module core (                       //Don't modify interface
 		
 		case (state_r)
 			S_IDLE: begin
-				if (i_in_valid)
-					next_state_w = S_IMG;
+				if (i_in_valid) next_state_w = S_IMG;
 			end
 			
 			S_IMG: begin
@@ -929,7 +954,7 @@ module core (                       //Don't modify interface
 						else begin
 							row_cnt_w = 0;
 							col_cnt_w = col_cnt_r + 1;
-							if (startup_delay_r) next_state_w = S_DONE;
+							if (startup_delay_r == 1) next_state_w = S_DONE;
 							else if (conv_done_w) begin
 								startup_delay_w = 1;
 								next_state_w = S_CONV12_BUFF;
@@ -1049,7 +1074,6 @@ module core (                       //Don't modify interface
 			shift_lsb_r <= 13'd0;
 			pass_cnt_r <= 7'd0;
 			seq_cnt_r <= 7'd0;
-			hei_cnt_r <= 4'd0;
 			index_r <= 9'd0;
 			seq_r <= 57'd0;
 			curr_seq_r <= 57'd0;
@@ -1065,7 +1089,6 @@ module core (                       //Don't modify interface
 			shift_lsb_r <= 13'd0;
 			pass_cnt_r <= 7'd0;
 			seq_cnt_r <= 7'd0;
-			hei_cnt_r <= 4'd0;
 			index_r <= 9'd0;
 			seq_r <= 57'd0;
 			curr_seq_r <= 57'd0;
@@ -1116,7 +1139,6 @@ module core (                       //Don't modify interface
 						if (not_stop_w) begin
 							// Invalid - reset
 							start_r <= 1'b0;
-							hei_cnt_r <= 4'd0;
 							row_start_r <= 1'b0;
 							index_r <= 9'd0;
 							seq_cnt_r <= 7'd0;
@@ -1130,7 +1152,6 @@ module core (                       //Don't modify interface
 								55: seq_r <= {curr_seq_r[54:0], lsb_w[3:2]};
 								56: seq_r <= {curr_seq_r[55:0], lsb_w[3]};
 							endcase
-							hei_cnt_r <= 4'd1;
 							seq_cnt_r <= 7'd0;
 							row_start_r <= 1'b0;
 						end
@@ -1138,14 +1159,12 @@ module core (                       //Don't modify interface
 					else if (hei_cnt_r < 4'd9) begin
 						// Rows 2-9: verify they match first row
 						if (is_match_seq_w) begin
-							hei_cnt_r <= hei_cnt_r + 4'd1;
 							seq_cnt_r <= 7'd0;
 							row_start_r <= 1'b0;
 						end
 						else begin
 							// Mismatch - reset
 							start_r <= 1'b0;
-							hei_cnt_r <= 4'd0;
 							row_start_r <= 1'b0;
 							index_r <= 9'd0;
 							seq_cnt_r <= 7'd0;
@@ -1182,7 +1201,6 @@ module core (                       //Don't modify interface
 						else begin
 							// Mismatch on 10th row - reset
 							start_r <= 1'b0;
-							hei_cnt_r <= 4'd0;
 							row_start_r <= 1'b0;
 							index_r <= 9'd0;
 							seq_cnt_r <= 7'd0;
@@ -1199,7 +1217,6 @@ module core (                       //Don't modify interface
 					seq_r <= {42'b0, shift_lsb_r[10:0], lsb_w};
 					index_r <= pass_cnt_r - 9'd10;
 					row_start_r <= 1'b1;
-					hei_cnt_r <= 4'd0;
 					curr_seq_r <= {42'b0, shift_lsb_r[10:0], lsb_w};
 				end
 				else if (shift_lsb_r[11:1] == START_CODE) begin
@@ -1208,7 +1225,6 @@ module core (                       //Don't modify interface
 					seq_r <= {41'b0, shift_lsb_r[11:0], lsb_w};
 					index_r <= pass_cnt_r - 9'd11;
 					row_start_r <= 1'b1;
-					hei_cnt_r <= 4'd0;
 					curr_seq_r <= {41'b0, shift_lsb_r[11:0], lsb_w};
 				end
 				else if (shift_lsb_r[12:2] == START_CODE) begin
@@ -1217,7 +1233,6 @@ module core (                       //Don't modify interface
 					seq_r <= {40'b0, shift_lsb_r[12:0], lsb_w};
 					index_r <= pass_cnt_r - 9'd12;
 					row_start_r <= 1'b1;
-					hei_cnt_r <= 4'd0;
 					curr_seq_r <= {40'b0, shift_lsb_r[12:0], lsb_w};
 				end
 			end
@@ -1230,7 +1245,6 @@ module core (                       //Don't modify interface
 	always @(posedge i_clk or negedge i_rst_n) begin
 		if (!i_rst_n) begin
 			flip_r <= 1'b0;
-			img_done_r <= 1'b0;
 			for (i = 0; i < 8; i = i + 1) begin
 				wen_r[i] <= 1'b1;
 				img_addr_r[i] <= 9'd0;
@@ -1240,7 +1254,6 @@ module core (                       //Don't modify interface
 			img_addr_offset_r <= 0;
 		end
 		else if (state_r == S_IDLE) begin
-			img_done_r <= 1'b0;
 			for (i = 0; i < 8; i = i + 1) begin
 				wen_r[i] <= 1'b1;
 				img_addr_r[i] <= 9'd0;
@@ -1287,10 +1300,6 @@ module core (                       //Don't modify interface
 					wen_r[i] <= 1'b0;
 				flip_r <= 1'b0;
 			end
-			
-			// Mark done when last address reached
-			if (img_addr_r[0] == 9'd511 && flip_r == 1'b1)
-				img_done_r <= 1'b1;
 		end
 		else if (state_r == S_BUFF) begin
 			// Disable writing after image loading complete
@@ -1351,6 +1360,7 @@ module core (                       //Don't modify interface
 			three_cnt_r <= 2'd0;
 		end
 		else begin
+			o_out_data4_r <= 8'd0;
 			three_cnt_r <= three_cnt_w;
 			startup_delay_r <= startup_delay_w;
 			case (state_r)
@@ -1401,7 +1411,7 @@ module core (                       //Don't modify interface
 							else begin
 								o_out_valid1_r <= 1'b1;
 								o_out_data1_r <= acc_clamped_w;
-								o_out_addr1_r <= {2'b0, half_row_dec_w, half_col_w};
+								o_out_addr1_r <= {2'b0, half_row_dec_w[4:0], half_col_w[4:0]};
 							end
 						end
 					end
@@ -1422,7 +1432,7 @@ module core (                       //Don't modify interface
 						else begin
 							o_out_valid1_r <= 1'b1;
 							o_out_data1_r <= acc_clamped_w;
-							o_out_addr1_r <= {2'b0, half_row_w, half_col_w};
+							o_out_addr1_r <= {2'b0, half_row_w[4:0], half_col_w[4:0]};
 						end
 					end
 				end
@@ -1445,7 +1455,7 @@ module core (                       //Don't modify interface
 							else begin
 								o_out_valid1_r <= 1'b1;
 								o_out_data1_r <= acc_clamped_w;
-								o_out_addr1_r <= {2'b0, half_row_dec_w, half_col_w};
+								o_out_addr1_r <= {2'b0, half_row_dec_w[4:0], half_col_w[4:0]};
 							end
 						end
 					end 
@@ -1467,7 +1477,7 @@ module core (                       //Don't modify interface
 						else begin
 							o_out_valid1_r <= 1'b1;
 							o_out_data1_r <= acc_clamped_w;
-							o_out_addr1_r <= {2'b0, half_row_dec_w, half_col_dec_w};
+							o_out_addr1_r <= {2'b0, half_row_dec_w[4:0], half_col_dec_w[4:0]};
 						end
 					end
 				end
