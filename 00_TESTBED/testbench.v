@@ -332,7 +332,7 @@ module testbed;
             $display("  *    OVERALL COMPARISON RESULTS     *");
             $display("  *************************************");
 
-            if (error !== 0) begin
+            if (error === 0) begin
                 $display("");
                 $display("         #    ###############    _   _ ");
                 $display("        #     #             #    *   * ");
