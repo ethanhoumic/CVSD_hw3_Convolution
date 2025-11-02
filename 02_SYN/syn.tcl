@@ -48,7 +48,7 @@ check_timing > Report/check_timing.txt
 
 uniquify
 set_fix_multiple_port_nets -all -buffer_constants [get_designs *]
-compile
+compile_ultra -retime
 
 # Report Output
 current_design [get_designs ${DESIGN}]
