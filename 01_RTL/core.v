@@ -215,9 +215,11 @@ module core (                       //Don't modify interface
 	wire [8:0] addr1_reset_w = win_col_right[5:3] << 6;
 	wire [8:0] addr2_reset_w = win_next_col_right[5:3] << 6;
 	wire [5:0] row_dec_w = row_cnt_r - 6'd1;
+	wire [5:0] col_dec_w = col_cnt_r - 6'd1;
 	wire [4:0] half_row_w = row_cnt_r >> 1;
 	wire [4:0] half_col_w = col_cnt_r >> 1;
 	wire [4:0] half_row_dec_w = row_dec_w >> 1;
+	wire [4:0] half_col_dec_w = col_dec_w >> 1;
 
 	reg [7:0] buff1_r, buff1_w;
 	reg [7:0] buff2_r, buff2_w;
@@ -1431,9 +1433,21 @@ module core (                       //Don't modify interface
 
 				S_CONV12: begin
 					if (three_cnt_r == 1 && prev_state_r != S_CONV12_BUFF) begin
-						o_out_valid1_r <= 1;
-						o_out_data1_r <= acc_clamped_w;
-						o_out_addr1_r <= {row_cnt_r - 6'd1, col_cnt_r};
+						if (str_r == 1) begin
+							o_out_valid1_r <= 1;
+							o_out_data1_r <= acc_clamped_w;
+							o_out_addr1_r <= {row_dec_w, col_cnt_r};
+						end
+						else begin
+							if (row_dec_w[0] || col_cnt_r[0]) begin
+								o_out_valid1_r <= 0;
+							end
+							else begin
+								o_out_valid1_r <= 1'b1;
+								o_out_data1_r <= acc_clamped_w;
+								o_out_addr1_r <= {2'b0, half_row_dec_w, half_col_w};
+							end
+						end
 					end 
 					else begin
 						o_out_valid1_r <= 0;
@@ -1441,9 +1455,21 @@ module core (                       //Don't modify interface
 				end
 
 				S_CONV12_BUFF: begin
-					o_out_valid1_r <= 1;
-					o_out_data1_r <= acc_clamped_w;
-					o_out_addr1_r <= {row_cnt_r - 6'd1, col_cnt_r - 6'd1};
+					if (str_r == 1) begin
+						o_out_valid1_r <= 1;
+						o_out_data1_r <= acc_clamped_w;
+						o_out_addr1_r <= {row_cnt_r - 6'd1, col_cnt_r - 6'd1};
+					end
+					else begin
+						if (row_dec_w[0] || col_cnt_r[0]) begin
+							o_out_valid1_r <= 0;
+						end
+						else begin
+							o_out_valid1_r <= 1'b1;
+							o_out_data1_r <= acc_clamped_w;
+							o_out_addr1_r <= {2'b0, half_row_dec_w, half_col_dec_w};
+						end
+					end
 				end
 
 				S_DONE: begin
