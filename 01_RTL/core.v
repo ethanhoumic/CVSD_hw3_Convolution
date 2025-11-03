@@ -29,7 +29,7 @@ module core (                       //Don't modify interface
 	// ============================================================================
 	reg [7:0]  o_out_data1_r, o_out_data2_r, o_out_data3_r, o_out_data4_r;
 	reg        o_in_ready_r;
-	reg        o_out_valid1_r, o_out_valid2_r, o_out_valid3_r, o_out_valid4_r;
+	reg        o_out_valid1_r, o_out_valid1_w, o_out_valid2_r, o_out_valid3_r, o_out_valid4_r;
 	reg [11:0] o_out_addr1_r;
 	reg        exe_finish_r;
 
@@ -196,7 +196,9 @@ module core (                       //Don't modify interface
 	wire conv_done_w    = (str1_inc_col_w && col_cnt_r == 6'd63);
 
 	// Padding detection
+	wire signed [7:0] win_next_col = col_cnt_r + 1;
 	wire signed [7:0] win_col_left  = $signed({2'b0, col_cnt_r}) - $signed({6'b0, dil_r});
+	wire signed [7:0] win_next_col_left  = $signed({2'b0, col_cnt_r}) + 1- $signed({6'b0, dil_r});
 	wire signed [7:0] win_col_right = $signed({2'b0, col_cnt_r}) + $signed({6'b0, dil_r});
 	wire signed [7:0] win_next_col_right = $signed({1'b0, col_cnt_r}) + 1 + $signed({6'b0, dil_r});  // 1 = str but omitted
 	wire signed [7:0] win_row_bot   = $signed({1'b0, row_cnt_r}) + $signed({6'b0, 1'b1}) + $signed({6'b0, dil_r}); // 1 = str but omitted
@@ -216,9 +218,10 @@ module core (                       //Don't modify interface
 	wire [5:0] half_col_w = col_cnt_r >> 1;
 	wire [5:0] half_row_dec_w = row_dec_w >> 1;
 	wire [5:0] half_col_dec_w = col_dec_w >> 1;
+	wire       row_below_2_w = (row_cnt_r < 2);
 
-	reg [7:0] buff1_r, buff1_w;
-	reg [7:0] buff2_r, buff2_w;
+	reg [7:0] buff1_r, buff2_r, buff3_r, buff4_r, buff5_r, buff6_r, buff7_r, buff8_r, buff9_r, buff10_r, buff11_r, buff12_r;
+	reg [7:0] buff1_w, buff2_w, buff3_w, buff4_w, buff5_w, buff6_w, buff7_w, buff8_w, buff9_w, buff10_w, buff11_w, buff12_w;
 	reg [4:0] prev_state_r;
 
 	// ============================================================================
@@ -298,10 +301,21 @@ module core (                       //Don't modify interface
 		col_cnt_w = col_cnt_r;
 		buff1_w = buff1_r;
 		buff2_w = buff2_r;
+		buff3_w = buff3_r;
+		buff4_w = buff4_r;
+		buff5_w = buff5_r;
+		buff6_w = buff6_r;
+		buff7_w = buff7_r;
+		buff8_w = buff8_r;
+		buff9_w = buff9_r;
+		buff10_w = buff10_r;
+		buff11_w = buff11_r;
+		buff12_w = buff12_r;
 		img_addr_inc_w = img_addr_inc_r;
 		img_addr_offset_w = img_addr_offset_r;
 		startup_delay_w = startup_delay_r;
 		three_cnt_w = three_cnt_r;
+		o_out_valid1_w = o_out_valid1_r;
 		
 		for (i = 0; i < 8; i = i + 1) img_addr_w[i] = img_addr_r[i];
 		for (i = 0; i < 9; i = i + 1) mul_w[i] = mul_r[i];
@@ -358,8 +372,9 @@ module core (                       //Don't modify interface
 						mul_w[3] = 8'd0;
 						mul_w[4] = sram_packed_w[0 +: 8];
 						mul_w[5] = (dil_r == 1) ? sram_packed_w[8 +: 8] : sram_packed_w[16 +: 8];
-						buff1_w = sram_packed_w[0 +: 8];
-						buff2_w = (dil_r == 1) ? sram_packed_w[8 +: 8] : sram_packed_w[16 +: 8];
+						buff1_w = (dil_r == 1) ? sram_packed_w[0 +: 8] : 0;
+						buff2_w = (dil_r == 1) ? sram_packed_w[8 +: 8] : sram_packed_w[0 +: 8];
+						buff3_w = sram_packed_w[16 +: 8];
 						
 						// Bottom row - zeros (will load in first S_CONV11_INIT cycle)
 						mul_w[6] = 8'd0;
@@ -375,7 +390,6 @@ module core (                       //Don't modify interface
 							img_addr_w[0] = 1;
 							img_addr_w[2] = 1;
 							three_cnt_w = 0;
-							row_cnt_w = 1;
 						end
 					end
 				endcase
@@ -736,230 +750,191 @@ module core (                       //Don't modify interface
 				mul_w[6] = extract_with_pad(win_col_left);
 				mul_w[7] = sram_packed_w[bit_index_w +: 8];
 				mul_w[8] = extract_with_pad(win_col_right);
-				if (row_cnt_r <= 1) begin
-					
-				end
-				else begin
-					case (col_cnt_r[2:0])
-						0: begin
-							img_addr_w[6] = (col_cnt_r == 0) ? 0 : img_addr_r[6] + 2;
-							img_addr_w[0] = img_addr_r[0] + 2;
-							img_addr_w[2] = img_addr_r[2] + 2;
-						end 
-						1: begin
-							img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + 2;
-							img_addr_w[1] = img_addr_r[1] + 2;
-							img_addr_w[3] = img_addr_r[3] + 2;
-						end 
-						2: begin
-							img_addr_w[0] = img_addr_r[0] + 2;
-							img_addr_w[2] = img_addr_r[2] + 2;
-							img_addr_w[4] = img_addr_r[4] + 2;
-						end 
-						3: begin
-							img_addr_w[1] = img_addr_r[1] + 2;
-							img_addr_w[3] = img_addr_r[3] + 2;
-							img_addr_w[5] = img_addr_r[5] + 2;
-						end 
-						4: begin
-							img_addr_w[2] = img_addr_r[2] + 2;
-							img_addr_w[4] = img_addr_r[4] + 2;
-							img_addr_w[6] = img_addr_r[6] + 2;
-						end 
-						5: begin
-							img_addr_w[3] = img_addr_r[3] + 2;
-							img_addr_w[5] = img_addr_r[5] + 2;
-							img_addr_w[7] = img_addr_r[7] + 2;
-						end 
-						6: begin
-							img_addr_w[4] = img_addr_r[4] + 2;
-							img_addr_w[6] = img_addr_r[6] + 2;
-							img_addr_w[0] = img_addr_r[0] + 2;
-						end 
-						7: begin
-							img_addr_w[5] = img_addr_r[5] + 2;
-							img_addr_w[7] = img_addr_r[7] + 2;
-							img_addr_w[1] = img_addr_r[1] + 2;
-						end
-					endcase
-				end
-				
+				buff4_w = extract_with_pad(win_col_left);
+				buff5_w = sram_packed_w[bit_index_w +: 8];
+				buff6_w = extract_with_pad(win_col_right);
+				case (col_cnt_r[2:0])
+					0: begin
+						img_addr_w[6] = (col_cnt_r == 0) ? 0 : img_addr_r[6] + 2;
+						img_addr_w[0] = img_addr_r[0] + 2;
+						img_addr_w[2] = img_addr_r[2] + 2;
+					end 
+					1: begin
+						img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + 2;
+						img_addr_w[1] = img_addr_r[1] + 2;
+						img_addr_w[3] = img_addr_r[3] + 2;
+					end 
+					2: begin
+						img_addr_w[0] = img_addr_r[0] + 2;
+						img_addr_w[2] = img_addr_r[2] + 2;
+						img_addr_w[4] = img_addr_r[4] + 2;
+					end 
+					3: begin
+						img_addr_w[1] = img_addr_r[1] + 2;
+						img_addr_w[3] = img_addr_r[3] + 2;
+						img_addr_w[5] = img_addr_r[5] + 2;
+					end 
+					4: begin
+						img_addr_w[2] = img_addr_r[2] + 2;
+						img_addr_w[4] = img_addr_r[4] + 2;
+						img_addr_w[6] = img_addr_r[6] + 2;
+					end 
+					5: begin
+						img_addr_w[3] = img_addr_r[3] + 2;
+						img_addr_w[5] = img_addr_r[5] + 2;
+						img_addr_w[7] = img_addr_r[7] + 2;
+					end 
+					6: begin
+						img_addr_w[4] = img_addr_r[4] + 2;
+						img_addr_w[6] = img_addr_r[6] + 2;
+						img_addr_w[0] = img_addr_r[0] + 2;
+					end 
+					7: begin
+						img_addr_w[5] = img_addr_r[5] + 2;
+						img_addr_w[7] = img_addr_r[7] + 2;
+						img_addr_w[1] = img_addr_r[1] + 2;
+					end
+				endcase
 				
 			end
 
 			S_CONV12: begin
-				three_cnt_w = (three_cnt_r == 2) ? 0 : three_cnt_r + 1;
+				three_cnt_w = (three_cnt_r == 2) ? 2 : three_cnt_r + 1;
 
 				case (three_cnt_r)
-					0: begin // output here
+					// 0: begin
+					// 	next_state_w = S_CONV12;
+					// 	if (pad_bottom) begin
+					// 		// Bottom edge - all zeros
+					// 		mul_w[6] = 8'd0;
+					// 		mul_w[7] = 8'd0;
+					// 		mul_w[8] = 8'd0;
+					// 	end
+					// 	else if (row_cnt_r == 1) begin
+					// 		// Not at bottom edge - extract with left/right edge detection
+					// 		mul_w[6] = extract_with_pad(win_col_left);
+					// 		mul_w[7] = sram_packed_w[bit_index_w +: 8];
+					// 		mul_w[8] = extract_with_pad(win_col_right);
+					// 	end
+					// 	if (row_cnt_r <= 1) begin
+					
+					// 	end
+					// 	else begin
+					// 		case (col_cnt_r[2:0])
+					// 			0: begin
+					// 				img_addr_w[6] = (col_cnt_r == 0) ? 0 : img_addr_r[6] + 2;
+					// 				img_addr_w[0] = img_addr_r[0] + 2;
+					// 				img_addr_w[2] = img_addr_r[2] + 2;
+					// 			end 
+					// 			1: begin
+					// 				img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + 2;
+					// 				img_addr_w[1] = img_addr_r[1] + 2;
+					// 				img_addr_w[3] = img_addr_r[3] + 2;
+					// 			end 
+					// 			2: begin
+					// 				img_addr_w[0] = img_addr_r[0] + 2;
+					// 				img_addr_w[2] = img_addr_r[2] + 2;
+					// 				img_addr_w[4] = img_addr_r[4] + 2;
+					// 			end 
+					// 			3: begin
+					// 				img_addr_w[1] = img_addr_r[1] + 2;
+					// 				img_addr_w[3] = img_addr_r[3] + 2;
+					// 				img_addr_w[5] = img_addr_r[5] + 2;
+					// 			end 
+					// 			4: begin
+					// 				img_addr_w[2] = img_addr_r[2] + 2;
+					// 				img_addr_w[4] = img_addr_r[4] + 2;
+					// 				img_addr_w[6] = img_addr_r[6] + 2;
+					// 			end 
+					// 			5: begin
+					// 				img_addr_w[3] = img_addr_r[3] + 2;
+					// 				img_addr_w[5] = img_addr_r[5] + 2;
+					// 				img_addr_w[7] = img_addr_r[7] + 2;
+					// 			end 
+					// 			6: begin
+					// 				img_addr_w[4] = img_addr_r[4] + 2;
+					// 				img_addr_w[6] = img_addr_r[6] + 2;
+					// 				img_addr_w[0] = img_addr_r[0] + 2;
+					// 			end 
+					// 			7: begin
+					// 				img_addr_w[5] = img_addr_r[5] + 2;
+					// 				img_addr_w[7] = img_addr_r[7] + 2;
+					// 				img_addr_w[1] = img_addr_r[1] + 2;
+					// 			end
+					// 		endcase
+					// 	end
+					// end
+					1: begin
 						next_state_w = S_CONV12;
-						if (pad_bottom) begin
-							// Bottom edge - all zeros
-							mul_w[6] = 8'd0;
-							mul_w[7] = 8'd0;
-							mul_w[8] = 8'd0;
+						mul_w[0] = 0;
+						mul_w[1] = 0;
+						mul_w[2] = 0;
+						mul_w[3] = extract_with_pad(win_col_left);
+						mul_w[4] = sram_packed_w[bit_index_w +: 8];
+						mul_w[5] = extract_with_pad(win_col_right);
+						buff7_w = extract_with_pad(win_col_left);
+						buff8_w = sram_packed_w[bit_index_w +: 8];
+						buff9_w = extract_with_pad(win_col_right);
+						row_cnt_w = 1;
+						case (col_cnt_r[2:0])
+							0: begin
+								img_addr_w[6] = (col_cnt_r == 0) ? 0 : img_addr_r[6] + 1;
+								img_addr_w[0] = img_addr_r[0] + 1;
+								img_addr_w[2] = img_addr_r[2] + 1;
+							end 
+							1: begin
+								img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + 1;
+								img_addr_w[1] = img_addr_r[1] + 1;
+								img_addr_w[3] = img_addr_r[3] + 1;
+							end 
+							2: begin
+								img_addr_w[0] = img_addr_r[0] + 1;
+								img_addr_w[2] = img_addr_r[2] + 1;
+								img_addr_w[4] = img_addr_r[4] + 1;
+							end 
+							3: begin
+								img_addr_w[1] = img_addr_r[1] + 1;
+								img_addr_w[3] = img_addr_r[3] + 1;
+								img_addr_w[5] = img_addr_r[5] + 1;
+							end 
+							4: begin
+								img_addr_w[2] = img_addr_r[2] + 1;
+								img_addr_w[4] = img_addr_r[4] + 1;
+								img_addr_w[6] = img_addr_r[6] + 1;
+							end
+							5: begin
+								img_addr_w[3] = img_addr_r[3] + 1;
+								img_addr_w[5] = img_addr_r[5] + 1;
+								img_addr_w[7] = img_addr_r[7] + 1;
+							end 
+							6: begin
+								img_addr_w[4] = img_addr_r[4] + 1;
+								img_addr_w[6] = img_addr_r[6] + 1;
+								img_addr_w[0] = img_addr_r[0] + 1;
+							end 
+							7: begin
+								img_addr_w[5] = img_addr_r[5] + 1;
+								img_addr_w[7] = img_addr_r[7] + 1;
+								img_addr_w[1] = img_addr_r[1] + 1;
+							end
+						endcase
+					end
+					2: begin // output here
+						if (row_cnt_r >= 61) begin
+							mul_w[6] = 0;
+							mul_w[7] = 0;
+							mul_w[8] = 0;
 						end
 						else begin
-							// Not at bottom edge - extract with left/right edge detection
 							mul_w[6] = extract_with_pad(win_col_left);
 							mul_w[7] = sram_packed_w[bit_index_w +: 8];
 							mul_w[8] = extract_with_pad(win_col_right);
 						end
-						if (row_cnt_r <= 1) begin
-					
-						end
-						else begin
-							case (col_cnt_r[2:0])
-								0: begin
-									img_addr_w[6] = (col_cnt_r == 0) ? 0 : img_addr_r[6] + 2;
-									img_addr_w[0] = img_addr_r[0] + 2;
-									img_addr_w[2] = img_addr_r[2] + 2;
-								end 
-								1: begin
-									img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + 2;
-									img_addr_w[1] = img_addr_r[1] + 2;
-									img_addr_w[3] = img_addr_r[3] + 2;
-								end 
-								2: begin
-									img_addr_w[0] = img_addr_r[0] + 2;
-									img_addr_w[2] = img_addr_r[2] + 2;
-									img_addr_w[4] = img_addr_r[4] + 2;
-								end 
-								3: begin
-									img_addr_w[1] = img_addr_r[1] + 2;
-									img_addr_w[3] = img_addr_r[3] + 2;
-									img_addr_w[5] = img_addr_r[5] + 2;
-								end 
-								4: begin
-									img_addr_w[2] = img_addr_r[2] + 2;
-									img_addr_w[4] = img_addr_r[4] + 2;
-									img_addr_w[6] = img_addr_r[6] + 2;
-								end 
-								5: begin
-									img_addr_w[3] = img_addr_r[3] + 2;
-									img_addr_w[5] = img_addr_r[5] + 2;
-									img_addr_w[7] = img_addr_r[7] + 2;
-								end 
-								6: begin
-									img_addr_w[4] = img_addr_r[4] + 2;
-									img_addr_w[6] = img_addr_r[6] + 2;
-									img_addr_w[0] = img_addr_r[0] + 2;
-								end 
-								7: begin
-									img_addr_w[5] = img_addr_r[5] + 2;
-									img_addr_w[7] = img_addr_r[7] + 2;
-									img_addr_w[1] = img_addr_r[1] + 2;
-								end
-							endcase
-						end
-					end
-					1: begin
-						next_state_w = S_CONV12;
-						mul_w[0] = (row_cnt_r <= 1) ? 0 : extract_with_pad(win_col_left);
-						mul_w[1] = (row_cnt_r <= 1) ? 0 : sram_packed_w[bit_index_w +: 8];
-						mul_w[2] = (row_cnt_r <= 1) ? 0 : extract_with_pad(win_col_right);
-						case (col_cnt_r[2:0])
-							0: begin
-								img_addr_w[6] = (col_cnt_r == 0) ? 0 : img_addr_r[6] + 2;
-								img_addr_w[0] = img_addr_r[0] + 2;
-								img_addr_w[2] = img_addr_r[2] + 2;
-							end 
-							1: begin
-								img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + 2;
-								img_addr_w[1] = img_addr_r[1] + 2;
-								img_addr_w[3] = img_addr_r[3] + 2;
-							end 
-							2: begin
-								img_addr_w[0] = img_addr_r[0] + 2;
-								img_addr_w[2] = img_addr_r[2] + 2;
-								img_addr_w[4] = img_addr_r[4] + 2;
-							end 
-							3: begin
-								img_addr_w[1] = img_addr_r[1] + 2;
-								img_addr_w[3] = img_addr_r[3] + 2;
-								img_addr_w[5] = img_addr_r[5] + 2;
-							end 
-							4: begin
-								img_addr_w[2] = img_addr_r[2] + 2;
-								img_addr_w[4] = img_addr_r[4] + 2;
-								img_addr_w[6] = img_addr_r[6] + 2;
-							end 
-							5: begin
-								img_addr_w[3] = img_addr_r[3] + 2;
-								img_addr_w[5] = img_addr_r[5] + 2;
-								img_addr_w[7] = img_addr_r[7] + 2;
-							end 
-							6: begin
-								img_addr_w[4] = img_addr_r[4] + 2;
-								img_addr_w[6] = img_addr_r[6] + 2;
-								img_addr_w[0] = img_addr_r[0] + 2;
-							end 
-							7: begin
-								img_addr_w[5] = img_addr_r[5] + 2;
-								img_addr_w[7] = img_addr_r[7] + 2;
-								img_addr_w[1] = img_addr_r[1] + 2;
-							end
-						endcase
-					end
-					2: begin
-						mul_w[3] = extract_with_pad(win_col_left);
-						mul_w[4] = sram_packed_w[bit_index_w +: 8];
-						mul_w[5] = extract_with_pad(win_col_right);
-						if (row_cnt_r != 63) begin
+						row_cnt_w = (startup_delay_r == 1) ? row_cnt_r + 1 : row_cnt_r;
+						startup_delay_w = 1;
+						if (row_cnt_r == 61) begin
 							next_state_w = S_CONV12;
-							row_cnt_w = row_cnt_r + 1;
-							case (col_cnt_r[2:0])
-								0: begin
-									img_addr_w[6] = (col_cnt_r == 0) ? 0 : (row_cnt_r == 0) ? addrf_reset_w + 1 : img_addr_r[6] - 3;
-									img_addr_w[0] = (row_cnt_r == 0) ? addr0_reset_w + 1 : img_addr_r[0] - 3;
-									img_addr_w[2] = (row_cnt_r == 0) ? addr1_reset_w + 1 : img_addr_r[2] - 3;
-								end 
-								1: begin
-									img_addr_w[7] = (row_cnt_r == 0) ? addrf_reset_w + 1 : img_addr_r[7] - 3;
-									img_addr_w[1] = (row_cnt_r == 0) ? addr0_reset_w + 1 : img_addr_r[1] - 3;
-									img_addr_w[3] = (row_cnt_r == 0) ? addr1_reset_w + 1 : img_addr_r[3] - 3;
-								end 
-								2: begin
-									img_addr_w[0] = (row_cnt_r == 0) ? addrf_reset_w + 1 : img_addr_r[0] - 3;
-									img_addr_w[2] = (row_cnt_r == 0) ? addr0_reset_w + 1 : img_addr_r[2] - 3;
-									img_addr_w[4] = (row_cnt_r == 0) ? addr1_reset_w + 1 : img_addr_r[4] - 3;
-								end 
-								3: begin
-									img_addr_w[1] = (row_cnt_r == 0) ? addrf_reset_w + 1 : img_addr_r[1] - 3;
-									img_addr_w[3] = (row_cnt_r == 0) ? addr0_reset_w + 1 : img_addr_r[3] - 3;
-									img_addr_w[5] = (row_cnt_r == 0) ? addr1_reset_w + 1 : img_addr_r[5] - 3;
-								end 
-								4: begin
-									img_addr_w[2] = (row_cnt_r == 0) ? addrf_reset_w + 1 : img_addr_r[2] - 3;
-									img_addr_w[4] = (row_cnt_r == 0) ? addr0_reset_w + 1 : img_addr_r[4] - 3;
-									img_addr_w[6] = (row_cnt_r == 0) ? addr1_reset_w + 1 : img_addr_r[6] - 3;
-								end 
-								5: begin
-									img_addr_w[3] = (row_cnt_r == 0) ? addrf_reset_w + 1 : img_addr_r[3] - 3;
-									img_addr_w[5] = (row_cnt_r == 0) ? addr0_reset_w + 1 : img_addr_r[5] - 3;
-									img_addr_w[7] = (row_cnt_r == 0) ? addr1_reset_w + 1 : img_addr_r[7] - 3;
-								end 
-								6: begin
-									img_addr_w[4] = (row_cnt_r == 0) ? addrf_reset_w + 1 : img_addr_r[4] - 3;
-									img_addr_w[6] = (row_cnt_r == 0) ? addr0_reset_w + 1 : img_addr_r[6] - 3;
-									img_addr_w[0] = (row_cnt_r == 0) ? addr1_reset_w + 1 : img_addr_r[0] - 3;
-								end 
-								7: begin
-									img_addr_w[5] = (row_cnt_r == 0) ? addrf_reset_w + 1 : img_addr_r[5] - 3;
-									img_addr_w[7] = (row_cnt_r == 0) ? addr0_reset_w + 1 : img_addr_r[7] - 3;
-									img_addr_w[1] = (row_cnt_r == 0) ? addr1_reset_w + 1 : img_addr_r[1] - 3;
-								end
-							endcase
-						end
-						else begin
-							row_cnt_w = 0;
-							col_cnt_w = col_cnt_r + 1;
-							if (startup_delay_r == 1) next_state_w = S_DONE;
-							else if (conv_done_w) begin
-								startup_delay_w = 1;
-								next_state_w = S_CONV12_BUFF;
-							end
-							else next_state_w = S_CONV12_BUFF;
+							row_cnt_w = 62;
 							case (col_cnt_r[2:0])
 								0: begin
 									img_addr_w[6] = (col_cnt_r == 0) ? 0 : (col_cnt_r[5:3]) << 6;
@@ -1003,20 +978,299 @@ module core (                       //Don't modify interface
 								end
 							endcase
 						end
+						else if (row_cnt_r == 62) begin
+							next_state_w = S_CONV12;
+							row_cnt_w = 63;
+							case (col_cnt_r[2:0])
+								0: begin
+									img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_w[7] + 2;
+									img_addr_w[1] = img_addr_w[1] + 2;
+									img_addr_w[3] = img_addr_w[3] + 2;
+								end
+								1: begin
+									img_addr_w[0] = img_addr_w[0] + 2;
+									img_addr_w[2] = img_addr_w[2] + 2;
+									img_addr_w[4] = img_addr_w[4] + 2;
+								end
+								2: begin
+									img_addr_w[1] = img_addr_w[1] + 2;
+									img_addr_w[3] = img_addr_w[3] + 2;
+									img_addr_w[5] = img_addr_w[5] + 2;
+								end
+								3: begin
+									img_addr_w[2] = img_addr_w[2] + 2;
+									img_addr_w[4] = img_addr_w[4] + 2;
+									img_addr_w[6] = img_addr_w[6] + 2;
+								end
+								4: begin
+									img_addr_w[3] = img_addr_w[3] + 2;
+									img_addr_w[5] = img_addr_w[5] + 2;
+									img_addr_w[7] = img_addr_w[7] + 2;
+								end
+								5: begin
+									img_addr_w[4] = img_addr_w[4] + 2;
+									img_addr_w[6] = img_addr_w[6] + 2;
+									img_addr_w[0] = img_addr_w[0] + 2;
+								end
+								6: begin
+									img_addr_w[5] = img_addr_w[5] + 2;
+									img_addr_w[7] = img_addr_w[7] + 2;
+									img_addr_w[1] = img_addr_w[1] + 2;
+								end
+								7: begin
+									img_addr_w[6] = img_addr_w[6] + 2;
+									img_addr_w[0] = img_addr_w[0] + 2;
+									img_addr_w[2] = img_addr_w[2] + 2;
+								end
+							endcase
+						end
+						else if (row_cnt_r == 63) begin
+							if (col_cnt_r == 63) next_state_w = S_DONE;
+							else next_state_w = S_CONV12_BUFF;
+							row_cnt_w = 0;
+							col_cnt_w = col_cnt_r + 1;
+							case (col_cnt_r[2:0])
+								0: begin
+									img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_w[7] - 1;
+									img_addr_w[1] = img_addr_w[1] - 1;
+									img_addr_w[3] = img_addr_w[3] - 1;
+								end
+								1: begin
+									img_addr_w[0] = img_addr_w[0] - 1;
+									img_addr_w[2] = img_addr_w[2] - 1;
+									img_addr_w[4] = img_addr_w[4] - 1;
+								end
+								2: begin
+									img_addr_w[1] = img_addr_w[1] - 1;
+									img_addr_w[3] = img_addr_w[3] - 1;
+									img_addr_w[5] = img_addr_w[5] - 1;
+								end
+								3: begin
+									img_addr_w[2] = img_addr_w[2] - 1;
+									img_addr_w[4] = img_addr_w[4] - 1;
+									img_addr_w[6] = img_addr_w[6] - 1;
+								end
+								4: begin
+									img_addr_w[3] = img_addr_w[3] - 1;
+									img_addr_w[5] = img_addr_w[5] - 1;
+									img_addr_w[7] = img_addr_w[7] - 1;
+								end
+								5: begin
+									img_addr_w[4] = img_addr_w[4] - 1;
+									img_addr_w[6] = img_addr_w[6] - 1;
+									img_addr_w[0] = img_addr_w[0] - 1;
+								end
+								6: begin
+									img_addr_w[5] = img_addr_w[5] - 1;
+									img_addr_w[7] = img_addr_w[7] - 1;
+									img_addr_w[1] = img_addr_w[1] - 1;
+								end
+								7: begin
+									img_addr_w[6] = img_addr_w[6] - 1;
+									img_addr_w[0] = img_addr_w[0] - 1;
+									img_addr_w[2] = img_addr_w[2] - 1;
+								end
+							endcase
+						end
+						else begin
+							next_state_w = S_CONV12;
+							case (col_cnt_r[2:0])
+								0: begin
+									img_addr_w[6] = (col_cnt_r == 0) ? 0 : img_addr_r[6] + 1;
+									img_addr_w[0] = img_addr_r[0] + 1;
+									img_addr_w[2] = img_addr_r[2] + 1;
+								end 
+								1: begin
+									img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + 1;
+									img_addr_w[1] = img_addr_r[1] + 1;
+									img_addr_w[3] = img_addr_r[3] + 1;
+								end 
+								2: begin
+									img_addr_w[0] = img_addr_r[0] + 1;
+									img_addr_w[2] = img_addr_r[2] + 1;
+									img_addr_w[4] = img_addr_r[4] + 1;
+								end 
+								3: begin
+									img_addr_w[1] = img_addr_r[1] + 1;
+									img_addr_w[3] = img_addr_r[3] + 1;
+									img_addr_w[5] = img_addr_r[5] + 1;
+								end 
+								4: begin
+									img_addr_w[2] = img_addr_r[2] + 1;
+									img_addr_w[4] = img_addr_r[4] + 1;
+									img_addr_w[6] = img_addr_r[6] + 1;
+								end 
+								5: begin
+									img_addr_w[3] = img_addr_r[3] + 1;
+									img_addr_w[5] = img_addr_r[5] + 1;
+									img_addr_w[7] = img_addr_r[7] + 1;
+								end 
+								6: begin
+									img_addr_w[4] = img_addr_r[4] + 1;
+									img_addr_w[6] = img_addr_r[6] + 1;
+									img_addr_w[0] = img_addr_r[0] + 1;
+								end 
+								7: begin
+									img_addr_w[5] = img_addr_r[5] + 1;
+									img_addr_w[7] = img_addr_r[7] + 1;
+									img_addr_w[1] = img_addr_r[1] + 1;
+								end
+							endcase
+						end
+						if (row_cnt_r == 63) begin
+							mul_w[0] = 0;
+							mul_w[1] = 0;
+							mul_w[2] = 0;
+							mul_w[3] = extract_with_pad(win_next_col_left);
+							mul_w[4] = extract_with_pad(win_next_col);
+							mul_w[5] = extract_with_pad(win_next_col_right);
+							buff1_w = extract_with_pad(win_next_col_left);
+							buff2_w = extract_with_pad(win_next_col);
+							buff3_w = extract_with_pad(win_next_col_right);
+						end
+						else if (row_cnt_r[0] && startup_delay_r != 0) begin
+							mul_w[0] = buff1_r;
+							mul_w[1] = buff2_r;
+							mul_w[2] = buff3_r;
+							mul_w[3] = buff4_r;
+							mul_w[4] = buff5_r;
+							mul_w[5] = buff6_r;
+							buff1_w = buff4_r;
+							buff2_w = buff5_r;
+							buff3_w = buff6_r;
+							buff4_w = extract_with_pad(win_col_left);
+							buff5_w = sram_packed_w[bit_index_w +: 8];
+							buff6_w = extract_with_pad(win_col_right);
+						end
+						else if (row_cnt_r == 1) begin
+							buff10_w = extract_with_pad(win_col_left);
+							buff11_w = sram_packed_w[bit_index_w +: 8];
+							buff12_w = extract_with_pad(win_col_right);
+						end
+						else if (!row_cnt_r[0]) begin
+							mul_w[0] = (row_cnt_r == 0)? mul_r[0] : buff7_r;
+							mul_w[1] = (row_cnt_r == 0) ? mul_r[1] : buff8_r;
+							mul_w[2] = (row_cnt_r == 0) ? mul_r[2] : buff9_r;
+							mul_w[3] = (row_cnt_r == 0) ? mul_r[3] : buff10_r;
+							mul_w[4] = (row_cnt_r == 0) ? mul_r[4] : buff11_r;
+							mul_w[5] = (row_cnt_r == 0) ? mul_r[5] : buff12_r;
+							buff7_w = (row_below_2_w) ? buff7_r : buff10_r;
+							buff8_w = (row_below_2_w) ? buff8_r :buff11_r;
+							buff9_w = (row_below_2_w) ? buff9_r :buff12_r;
+							buff10_w = extract_with_pad(win_col_left);
+							buff11_w = sram_packed_w[bit_index_w +: 8];
+							buff12_w = extract_with_pad(win_col_right);
+						end
 					end
 				endcase
 		
 			end
 
 			S_CONV12_BUFF: begin
-				three_cnt_w = 1;
-				next_state_w = S_CONV12;
-				mul_w[0] = 0;
-				mul_w[1] = 0;
-				mul_w[2] = 0;
-				mul_w[3] = extract_with_pad(win_col_right);
-				mul_w[4] = sram_packed_w[bit_index_w +: 8];
-				mul_w[5] = extract_with_pad(win_col_right);
+				
+				next_state_w = (three_cnt_r == 3) ? S_CONV12 : S_CONV12_BUFF;
+				if (three_cnt_r == 2) begin
+					three_cnt_w = 3;
+					mul_w[6] = extract_with_pad(win_col_left);
+					mul_w[7] = sram_packed_w[bit_index_w +: 8];
+					mul_w[8] = extract_with_pad(win_col_right);
+					buff4_w = extract_with_pad(win_col_left);
+					buff5_w = sram_packed_w[bit_index_w +: 8];
+					buff6_w = extract_with_pad(win_col_right);
+					case (col_cnt_r[2:0])
+						0: begin
+							img_addr_w[6] = (col_cnt_r <= 1) ? 0 : img_addr_r[6] + 2;
+							img_addr_w[0] = img_addr_r[0] + 2;
+							img_addr_w[2] = img_addr_r[2] + 2;
+						end 
+						1: begin
+							img_addr_w[7] = (col_cnt_r <= 1) ? 0 : img_addr_r[7] + 2;
+							img_addr_w[1] = img_addr_r[1] + 2;
+							img_addr_w[3] = img_addr_r[3] + 2;
+						end 
+						2: begin
+							img_addr_w[0] = img_addr_r[0] + 2;
+							img_addr_w[2] = img_addr_r[2] + 2;
+							img_addr_w[4] = img_addr_r[4] + 2;
+						end 
+						3: begin
+							img_addr_w[1] = img_addr_r[1] + 2;
+							img_addr_w[3] = img_addr_r[3] + 2;
+							img_addr_w[5] = img_addr_r[5] + 2;
+						end 
+						4: begin
+							img_addr_w[2] = img_addr_r[2] + 2;
+							img_addr_w[4] = img_addr_r[4] + 2;
+							img_addr_w[6] = img_addr_r[6] + 2;
+						end
+						5: begin
+							img_addr_w[3] = img_addr_r[3] + 2;
+							img_addr_w[5] = img_addr_r[5] + 2;
+							img_addr_w[7] = img_addr_r[7] + 2;
+						end 
+						6: begin
+							img_addr_w[4] = img_addr_r[4] + 2;
+							img_addr_w[6] = img_addr_r[6] + 2;
+							img_addr_w[0] = img_addr_r[0] + 2;
+						end 
+						7: begin
+							img_addr_w[5] = img_addr_r[5] + 2;
+							img_addr_w[7] = img_addr_r[7] + 2;
+							img_addr_w[1] = img_addr_r[1] + 2;
+						end
+					endcase
+				end
+				else begin
+					three_cnt_w = 2;
+					mul_w[3] = extract_with_pad(win_col_left);
+					mul_w[4] = sram_packed_w[bit_index_w +: 8];
+					mul_w[5] = extract_with_pad(win_col_right);
+					buff7_w = extract_with_pad(win_col_left);
+					buff8_w = sram_packed_w[bit_index_w +: 8];
+					buff9_w = extract_with_pad(win_col_right);
+					case (col_cnt_r[2:0])
+						0: begin
+							img_addr_w[6] = (col_cnt_r == 0) ? 0 : img_addr_r[6] + 1;
+							img_addr_w[0] = img_addr_r[0] + 1;
+							img_addr_w[2] = img_addr_r[2] + 1;
+						end 
+						1: begin
+							img_addr_w[7] = (col_cnt_r == 0) ? 0 : img_addr_r[7] + 1;
+							img_addr_w[1] = img_addr_r[1] + 1;
+							img_addr_w[3] = img_addr_r[3] + 1;
+						end 
+						2: begin
+							img_addr_w[0] = img_addr_r[0] + 1;
+							img_addr_w[2] = img_addr_r[2] + 1;
+							img_addr_w[4] = img_addr_r[4] + 1;
+						end 
+						3: begin
+							img_addr_w[1] = img_addr_r[1] + 1;
+							img_addr_w[3] = img_addr_r[3] + 1;
+							img_addr_w[5] = img_addr_r[5] + 1;
+						end 
+						4: begin
+							img_addr_w[2] = img_addr_r[2] + 1;
+							img_addr_w[4] = img_addr_r[4] + 1;
+							img_addr_w[6] = img_addr_r[6] + 1;
+						end
+						5: begin
+							img_addr_w[3] = img_addr_r[3] + 1;
+							img_addr_w[5] = img_addr_r[5] + 1;
+							img_addr_w[7] = img_addr_r[7] + 1;
+						end 
+						6: begin
+							img_addr_w[4] = img_addr_r[4] + 1;
+							img_addr_w[6] = img_addr_r[6] + 1;
+							img_addr_w[0] = img_addr_r[0] + 1;
+						end 
+						7: begin
+							img_addr_w[5] = img_addr_r[5] + 1;
+							img_addr_w[7] = img_addr_r[7] + 1;
+							img_addr_w[1] = img_addr_r[1] + 1;
+						end
+					endcase
+				end
 			end
 
 			S_DONE: begin
@@ -1035,7 +1289,7 @@ module core (                       //Don't modify interface
 	always @(posedge i_clk or negedge i_rst_n) begin
 		if (!i_rst_n) begin
 			state_r <= S_IDLE;
-			prev_state_r <= S_IDLE;
+			prev_state_r <= 0;
 		end
 		else begin
 			prev_state_r <= state_r;
@@ -1050,6 +1304,16 @@ module core (                       //Don't modify interface
 		if (!i_rst_n) begin
 			buff1_r <= 0;
 			buff2_r <= 0;
+			buff3_r <= 0;
+			buff4_r <= 0;
+			buff5_r <= 0;
+			buff6_r <= 0;
+			buff7_r <= 0;
+			buff8_r <= 0;
+			buff9_r <= 0;
+			buff10_r <= 0;
+			buff11_r <= 0;
+			buff12_r <= 0;
 			row_cnt_r <= 6'd0;
 			col_cnt_r <= 6'd0;
 			for (i = 0; i < 9; i = i + 1)
@@ -1059,6 +1323,16 @@ module core (                       //Don't modify interface
 			// Update from combinational logic
 			buff1_r <= buff1_w;
 			buff2_r <= buff2_w;
+			buff3_r <= buff3_w;
+			buff4_r <= buff4_w;
+			buff5_r <= buff5_w;
+			buff6_r <= buff6_w;
+			buff7_r <= buff7_w;
+			buff8_r <= buff8_w;
+			buff9_r <= buff9_w;
+			buff10_r <= buff10_w;
+			buff11_r <= buff11_w;
+			buff12_r <= buff12_w;
 			row_cnt_r <= row_cnt_w;
 			col_cnt_r <= col_cnt_w;
 			for (i = 0; i < 9; i = i + 1)
@@ -1442,20 +1716,20 @@ module core (                       //Don't modify interface
 				end
 
 				S_CONV12: begin
-					if (three_cnt_r == 1 && prev_state_r != S_CONV12_BUFF) begin
+					if (((three_cnt_r == 1 ) || (three_cnt_r == 2 && startup_delay_r == 1)) && prev_state_r != S_CONV12_BUFF) begin
 						if (str_r == 1) begin
 							o_out_valid1_r <= 1;
 							o_out_data1_r <= acc_clamped_w;
-							o_out_addr1_r <= {row_dec_w, col_cnt_r};
+							o_out_addr1_r <= {row_cnt_r, col_cnt_r};
 						end
 						else begin
-							if (row_dec_w[0] || col_cnt_r[0]) begin
+							if (row_cnt_r[0] || col_cnt_r[0]) begin
 								o_out_valid1_r <= 0;
 							end
 							else begin
 								o_out_valid1_r <= 1'b1;
 								o_out_data1_r <= acc_clamped_w;
-								o_out_addr1_r <= {2'b0, half_row_dec_w[4:0], half_col_w[4:0]};
+								o_out_addr1_r <= {2'b0, half_row_w[4:0], half_col_w[4:0]};
 							end
 						end
 					end 
@@ -1465,20 +1739,25 @@ module core (                       //Don't modify interface
 				end
 
 				S_CONV12_BUFF: begin
-					if (str_r == 1) begin
-						o_out_valid1_r <= 1;
-						o_out_data1_r <= acc_clamped_w;
-						o_out_addr1_r <= {row_cnt_r - 6'd1, col_cnt_r - 6'd1};
-					end
-					else begin
-						if (row_dec_w[0] || col_cnt_r[0]) begin
-							o_out_valid1_r <= 0;
+					if (three_cnt_r == 3) begin
+						if (str_r == 1) begin
+							o_out_valid1_r <= 1;
+							o_out_data1_r <= acc_clamped_w;
+							o_out_addr1_r <= {row_cnt_r, col_cnt_r};
 						end
 						else begin
-							o_out_valid1_r <= 1'b1;
-							o_out_data1_r <= acc_clamped_w;
-							o_out_addr1_r <= {2'b0, half_row_dec_w[4:0], half_col_dec_w[4:0]};
+							if (row_cnt_r[0] || col_cnt_r[0]) begin
+								o_out_valid1_r <= 0;
+							end
+							else begin
+								o_out_valid1_r <= 1'b1;
+								o_out_data1_r <= acc_clamped_w;
+								o_out_addr1_r <= {2'b0, half_row_w[4:0], half_col_w[4:0]};
+							end
 						end
+					end
+					else begin
+						o_out_valid1_r <= 0;
 					end
 				end
 
